@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.6.12;
+pragma solidity >=0.8.12;
 pragma experimental ABIEncoderV2;
 
 import "./Strategy.sol";
 
-contract AaveLenderBorrowerCloner {
+contract CompV3LenderBorrowerCloner {
     address public immutable original;
 
     event Cloned(address indexed clone);
@@ -12,23 +12,20 @@ contract AaveLenderBorrowerCloner {
 
     constructor(
         address _vault,
+        address _comet,
+        uint24 _ethToWantFee,
         address _yVault,
-        bool _isWantIncentivised,
-        bool _isInvestmentTokenIncentivised,
         string memory _strategyName
     ) public {
-        Strategy _original = new Strategy(_vault, _yVault, _strategyName);
+        Strategy _original = new Strategy(_vault, _comet, _ethToWantFee, _yVault, _strategyName);
         emit Deployed(address(_original));
 
         original = address(_original);
         Strategy(_original).setStrategyParams(
-            4_000, // targetLTVMultiplier (default: 4_000)
-            6_000, // warningLTVMultiplier default: 6_000
+            7_000, // targetLTVMultiplier (default: 7_000)
+            8_000, // warningLTVMultiplier default: 8_000
             1e27, // acceptableCosts (default: 1e27)
-            7, // default: 7 (Yearn Aave Referal code)
             type(uint256).max, // 2**256-1
-            _isWantIncentivised,
-            _isInvestmentTokenIncentivised,
             false, // leave debt behind (default: false)
             1, // maxLoss (default: 1)
             60 * 1e9 // max base fee to perform non-emergency tends (default: 60 gwei)
@@ -40,7 +37,7 @@ contract AaveLenderBorrowerCloner {
     }
 
     function name() external pure returns (string memory) {
-        return "Yearn-AaveLenderBorrowerCloner@0.4.3";
+        return "Yearn-CompV3LenderBorrowerCloner@0.4.3";
     }
 
     function cloneAaveLenderBorrower(
@@ -48,9 +45,9 @@ contract AaveLenderBorrowerCloner {
         address _strategist,
         address _rewards,
         address _keeper,
+        address _comet,
+        uint24 _ethToWantFee,
         address _yVault,
-        bool _isWantIncentivised,
-        bool _isInvestmentTokenIncentivised,
         string memory _strategyName
     ) external returns (address newStrategy) {
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
@@ -70,16 +67,13 @@ contract AaveLenderBorrowerCloner {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        Strategy(newStrategy).initialize(_vault, _yVault, _strategyName);
+        Strategy(newStrategy).initialize(_vault, _comet, _ethToWantFee, _yVault, _strategyName);
 
         Strategy(newStrategy).setStrategyParams(
-            4_000, // targetLTVMultiplier (default: 4_000)
-            6_000, // warningLTVMultiplier default: 6_000
+            7_000, // targetLTVMultiplier (default: 7_000)
+            8_000, // warningLTVMultiplier default: 8_000
             1e27, // acceptableCosts (default: 1e27)
-            7, // default: 7 (Yearn Aave Referal code)
             type(uint256).max, // max debt to take
-            _isWantIncentivised,
-            _isInvestmentTokenIncentivised,
             false, // leave debt behind (default: false)
             1, // maxLoss (default: 1)
             60 * 1e9 // max base fee to perform non-emergency tends (default: 60 gwei)
