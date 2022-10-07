@@ -16,7 +16,7 @@ contract CompV3LenderBorrowerCloner {
         uint24 _ethToWantFee,
         address _yVault,
         string memory _strategyName
-    ) public {
+    ) {
         Strategy _original = new Strategy(_vault, _comet, _ethToWantFee, _yVault, _strategyName);
         emit Deployed(address(_original));
 
