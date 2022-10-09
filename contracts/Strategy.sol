@@ -15,7 +15,6 @@ import {CometStructs} from "./interfaces/CompoundV3/CompoundV3.sol";
 import {Comet} from "./interfaces/CompoundV3/CompoundV3.sol";
 import {CometRewards} from "./interfaces/CompoundV3/CompoundV3.sol";
 import {ISwapRouter} from "./interfaces/UniswapV3/ISwapRouter.sol";
-import {ITradeFactory} from "./interfaces/ySwaps/ITradeFactory.sol";
 
 interface IBaseFee {
     function isCurrentBaseFeeAcceptable() external view returns (bool);
@@ -33,10 +32,6 @@ contract Strategy is BaseStrategy {
     uint internal constant DAYS_PER_YEAR = 365;
     uint internal constant SECONDS_PER_DAY = 60 * 60 * 24;
     uint internal constant SECONDS_PER_YEAR = 365 days;
-
-    // max interest rate we can afford to pay for borrowing investment token
-    // amount in Ray (1e27 = 100%)
-    uint256 public acceptableCostsRay;
 
     // max amount to borrow. used to manually limit amount (for yVault to keep APY)
     uint256 public maxTotalBorrowIT;
@@ -79,8 +74,7 @@ contract Strategy is BaseStrategy {
     uint24 public compToEthFee;
     uint24 public ethToBaseFee;
     uint24 public ethToWantFee;
-    //Address of the trad factory if we want to use it
-    address public tradeFactory;
+
     //Needs to be set to at least comet.baseBorrowMin
     uint256 internal minThreshold;
     uint256 public maxLoss;
@@ -108,7 +102,6 @@ contract Strategy is BaseStrategy {
     function setStrategyParams(
         uint16 _targetLTVMultiplier,
         uint16 _warningLTVMultiplier,
-        uint256 _acceptableCostsRay,
         uint256 _maxTotalBorrowIT,
         bool _leaveDebtBehind,
         uint256 _maxLoss,
@@ -120,7 +113,6 @@ contract Strategy is BaseStrategy {
         );
         targetLTVMultiplier = _targetLTVMultiplier;
         warningLTVMultiplier = _warningLTVMultiplier;
-        acceptableCostsRay = _acceptableCostsRay;
         maxTotalBorrowIT = _maxTotalBorrowIT;
         leaveDebtBehind = _leaveDebtBehind;
         maxGasPriceToTend = _maxGasPriceToTend;
@@ -149,8 +141,10 @@ contract Strategy is BaseStrategy {
         require(address(comet) == address(0), "already initiliazed"); // dev: strategy already initialized
         comet = Comet(_comet);
 
-        yVault = IVault(_yVault);
         baseToken = comet.baseToken();
+        minThreshold = comet.baseBorrowMin();
+        yVault = IVault(_yVault);
+
         require(baseToken == address(yVault.token()), "wrong yvualt");
 
         BASE_MANTISSA = comet.baseScale();
@@ -159,6 +153,7 @@ contract Strategy is BaseStrategy {
         want.safeApprove(_comet, type(uint256).max);
         IERC20(baseToken).safeApprove(_comet, type(uint256).max);
         IERC20(baseToken).safeApprove(_yVault, type(uint256).max);
+        IERC20(comp).safeApprove(address(router), type(uint256).max);
 
         //Default to .3% pool
         compToEthFee = 3000;
@@ -317,7 +312,7 @@ contract Strategy is BaseStrategy {
             uint256 amountToBorrowIT =
                 _fromUsd(amountToBorrowUsd, baseToken);
 
-            if (amountToBorrowIT > 0) {
+            if (amountToBorrowIT > minThreshold) {
                 _withdraw(baseToken, amountToBorrowIT);
             }
         } else if (
@@ -430,6 +425,8 @@ contract Strategy is BaseStrategy {
             //harvest takes priority
             return false;
         }
+        
+        if(comet.isLiquidatable(address(this))) return true;
         // we adjust position if:
         // 1. LTV ratios are not in the HEALTHY range (either we take on more debt or repay debt)
         // 2. costs are not acceptable and we need to repay debt
@@ -613,14 +610,6 @@ contract Strategy is BaseStrategy {
     }
 
     /*
-    * Get the current supply APR in Compound III
-    */
-    function getSupplyApr() public view returns (uint) {
-        uint utilization = comet.getUtilization();
-        return comet.getSupplyRate(utilization) * SECONDS_PER_YEAR * 100;
-    }
-
-    /*
     * Get the current borrow APR in Compound III
     */
     function getBorrowApr(uint256 newAmount) public view returns (uint) {
@@ -724,17 +713,12 @@ contract Strategy is BaseStrategy {
             return 0;
         }
         // we check if the collateral that we are withdrawing leaves us in a risky range, we then take action
-        uint256 collateralInUsd = _toUsd(balanceOfCollateral(), address(want));
+        uint256 newCollateral = _toUsd(balanceOfCollateral() - amount, address(want));
+        uint256 targetLTV = _getTargetLTV(getLiquidateCollateralFactor());
         uint256 debtInUsd = _toUsd(balanceOfDebt(), baseToken);
 
-        uint256 currentLTV = debtInUsd * MAX_BPS / collateralInUsd;
-   
-        uint256 currentLiquidationThreshold = getLiquidateCollateralFactor();
-
-        uint256 warningLTV = _getWarningLTV(currentLiquidationThreshold);
-        uint256 targetLTV = _getTargetLTV(currentLiquidationThreshold);
-        uint256 amountUsd = _toUsd(amount, address(want));
-
+        uint256 targetDebtUsd = newCollateral * targetLTV / 1e18;
+        return _fromUsd(debtInUsd - targetDebtUsd, baseToken);
     }
 
     function _checkAllowance(
@@ -894,29 +878,5 @@ contract Strategy is BaseStrategy {
         return
             IBaseFee(0xb5e1CAcB567d98faaDB60a1fD4820720141f064F)
                 .isCurrentBaseFeeAcceptable();
-    }
-
-    // ---------------------- YSWAPS FUNCTIONS ----------------------
-    function setTradeFactory(address _tradeFactory) external onlyGovernance {
-        if (tradeFactory != address(0)) {
-            _removeTradeFactoryPermissions();
-        }
-
-        ITradeFactory tf = ITradeFactory(_tradeFactory);
-
-        IERC20(comp).safeApprove(_tradeFactory, type(uint256).max);
-        tf.enable(comp, address(want));
-        
-        tradeFactory = _tradeFactory;
-    }
-
-    function removeTradeFactoryPermissions() external onlyAuthorized {
-        _removeTradeFactoryPermissions();
-    }
-
-    function _removeTradeFactoryPermissions() internal {
-        IERC20(comp).safeApprove(tradeFactory, 0);
-        
-        tradeFactory = address(0);
     }
 }

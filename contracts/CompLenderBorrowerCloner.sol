@@ -24,7 +24,6 @@ contract CompV3LenderBorrowerCloner {
         Strategy(_original).setStrategyParams(
             7_000, // targetLTVMultiplier (default: 7_000)
             8_000, // warningLTVMultiplier default: 8_000
-            1e27, // acceptableCosts (default: 1e27)
             type(uint256).max, // 2**256-1
             false, // leave debt behind (default: false)
             1, // maxLoss (default: 1)
@@ -72,7 +71,6 @@ contract CompV3LenderBorrowerCloner {
         Strategy(newStrategy).setStrategyParams(
             7_000, // targetLTVMultiplier (default: 7_000)
             8_000, // warningLTVMultiplier default: 8_000
-            1e27, // acceptableCosts (default: 1e27)
             type(uint256).max, // max debt to take
             false, // leave debt behind (default: false)
             1, // maxLoss (default: 1)

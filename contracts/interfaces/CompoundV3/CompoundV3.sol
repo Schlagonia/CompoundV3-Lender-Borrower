@@ -61,7 +61,7 @@ interface Comet is IERC20 {
 
   function getAssetInfoByAddress(address asset) external view returns (CometStructs.AssetInfo memory);
   function getAssetInfo(uint8 i) external view returns (CometStructs.AssetInfo memory);
-  
+
   function borrowBalanceOf(address account) external view returns (uint256);
 
   function getPrice(address priceFeed) external view returns (uint128);
@@ -91,6 +91,9 @@ interface Comet is IERC20 {
   function baseToken() external view returns (address);
 
   function accrueAccount(address account) external;
+  
+  function isLiquidatable(address _address) external view returns(bool);
+  function baseBorrowMin() external view returns(uint256);
 }
 
 interface CometRewards {
