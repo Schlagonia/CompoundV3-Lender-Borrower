@@ -32,15 +32,17 @@ contract Strategy is BaseStrategy {
     uint internal constant DAYS_PER_YEAR = 365;
     uint internal constant SECONDS_PER_DAY = 60 * 60 * 24;
     uint internal constant SECONDS_PER_YEAR = 365 days;
+    //Used for apr calculations
+    uint public BASE_MANTISSA;
+    uint public BASE_INDEX_SCALE;
 
     // max amount to borrow. used to manually limit amount (for yVault to keep APY)
-    uint256 public maxTotalBorrowIT;
+    uint256 public maxTotalBorrowBT;
 
     // if set to true, the strategy will not try to repay debt by selling want
     bool public leaveDebtBehind;
 
     // NOTE: LTV = Loan-To-Value = debt/collateral
-
     // Target LTV: ratio up to which which we will borrow
     uint16 public targetLTVMultiplier = 7_000;
 
@@ -54,8 +56,7 @@ contract Strategy is BaseStrategy {
     Comet public comet;
     //This is the token we will be borrowing/supplying
     address public baseToken;
-    uint public BASE_MANTISSA;
-    uint public BASE_INDEX_SCALE;
+    
     CometRewards public constant rewardsContract = 
         CometRewards(0x1B0e765F6224C21223AeA2af16c1C46E38885a40); 
     
@@ -75,7 +76,7 @@ contract Strategy is BaseStrategy {
     uint24 public ethToBaseFee;
     uint24 public ethToWantFee;
 
-    //Needs to be set to at least comet.baseBorrowMin
+    //Needs to be set to at least comet.baseBorrowMin()
     uint256 internal minThreshold;
     uint256 public maxLoss;
     uint256 public maxGasPriceToTend;
@@ -102,7 +103,7 @@ contract Strategy is BaseStrategy {
     function setStrategyParams(
         uint16 _targetLTVMultiplier,
         uint16 _warningLTVMultiplier,
-        uint256 _maxTotalBorrowIT,
+        uint256 _maxTotalBorrowBT,
         bool _leaveDebtBehind,
         uint256 _maxLoss,
         uint256 _maxGasPriceToTend
@@ -113,7 +114,7 @@ contract Strategy is BaseStrategy {
         );
         targetLTVMultiplier = _targetLTVMultiplier;
         warningLTVMultiplier = _warningLTVMultiplier;
-        maxTotalBorrowIT = _maxTotalBorrowIT;
+        maxTotalBorrowBT = _maxTotalBorrowBT;
         leaveDebtBehind = _leaveDebtBehind;
         maxGasPriceToTend = _maxGasPriceToTend;
 
@@ -138,14 +139,14 @@ contract Strategy is BaseStrategy {
         string memory _strategyName
     ) internal {
         // Make sure we only initialize one time
-        require(address(comet) == address(0), "already initiliazed"); // dev: strategy already initialized
+        require(address(comet) == address(0), "!comet");
         comet = Comet(_comet);
 
         baseToken = comet.baseToken();
         minThreshold = comet.baseBorrowMin();
         yVault = IVault(_yVault);
 
-        require(baseToken == address(yVault.token()), "wrong yvualt");
+        require(baseToken == address(yVault.token()), "!base");
 
         BASE_MANTISSA = comet.baseScale();
         BASE_INDEX_SCALE = comet.baseIndexScale();
@@ -173,7 +174,7 @@ contract Strategy is BaseStrategy {
         uint24 _ethToWantFee,
         address _yVault,
         string memory _strategyName
-    ) public {
+    ) external {
         address sender = msg.sender;
         _initialize(_vault, sender, sender, sender);
         _initializeThis(_comet, _ethToWantFee, _yVault, _strategyName);
@@ -244,7 +245,7 @@ contract Strategy is BaseStrategy {
             _supply(address(want), amountToDeposit);
         }
 
-        // NOTE: debt + collateral calcs are done in ETH
+        // NOTE: debt + collateral calcs are done in USD
         uint256 collateralInUsd = _toUsd(balanceOfCollateral(), address(want));
 
         // if there is no want deposited into compound, don't do nothing
@@ -256,8 +257,8 @@ contract Strategy is BaseStrategy {
         uint256 debtInUsd = _toUsd(balanceOfDebt(), baseToken);
         uint256 currentLiquidationThreshold = getLiquidateCollateralFactor();
 
-        uint256 currentLTV = debtInUsd * MAX_BPS / collateralInUsd;
-        uint256 targetLTV = _getTargetLTV(currentLiquidationThreshold); // 60% under liquidation Threshold
+        uint256 currentLTV = debtInUsd * 1e18 / collateralInUsd;
+        uint256 targetLTV = _getTargetLTV(currentLiquidationThreshold); // 70% under liquidation Threshold
         uint256 warningLTV = _getWarningLTV(currentLiquidationThreshold); // 80% under liquidation Threshold
 
         // decide in which range we are and act accordingly:
@@ -282,7 +283,7 @@ contract Strategy is BaseStrategy {
 
             // we need to take on more debt
             uint256 targetDebtUsd =
-                collateralInUsd * targetLTV / MAX_BPS;
+                collateralInUsd * targetLTV / 1e18;
 
             uint256 amountToBorrowUsd = targetDebtUsd - debtInUsd; // safe bc we checked ratios
 
@@ -294,7 +295,7 @@ contract Strategy is BaseStrategy {
             }
 
             uint256 maxTotalBorrowUsd =
-                _toUsd(maxTotalBorrowIT, baseToken);
+                _toUsd(maxTotalBorrowBT, baseToken);
             if (debtInUsd + amountToBorrowUsd > maxTotalBorrowUsd) {
                 amountToBorrowUsd = maxTotalBorrowUsd > debtInUsd
                     ? maxTotalBorrowUsd - debtInUsd
@@ -302,18 +303,18 @@ contract Strategy is BaseStrategy {
             }
 
             //We want to make sure that the reward apr > borrow apr so we dont reprot a loss
-            uint256 expectedBorrowApr = getBorrowApr(_fromUsd(maxTotalBorrowUsd, baseToken));
-            uint256 expectedRewardApr = getRewardAprForBorrowBase(_fromUsd(maxTotalBorrowUsd, baseToken));
+            uint256 expectedBorrowApr = getBorrowApr(_fromUsd(amountToBorrowUsd, baseToken));
+            uint256 expectedRewardApr = getRewardAprForBorrowBase(_fromUsd(amountToBorrowUsd, baseToken));
             if(expectedBorrowApr > expectedRewardApr) {
-                maxTotalBorrowUsd = 0;
+                amountToBorrowUsd = 0;
             }
 
             // convert to BaseToken
-            uint256 amountToBorrowIT =
+            uint256 amountToBorrowBT =
                 _fromUsd(amountToBorrowUsd, baseToken);
 
-            if (amountToBorrowIT > minThreshold) {
-                _withdraw(baseToken, amountToBorrowIT);
+            if (amountToBorrowBT > minThreshold) {
+                _withdraw(baseToken, amountToBorrowBT);
             }
         } else if (
             currentLTV > warningLTV || currentBorrowApr > currentRewardApr
@@ -321,17 +322,17 @@ contract Strategy is BaseStrategy {
             // UNHEALTHY RATIO
             // we may be in this case if the current cost of capital is higher than our max cost of capital
             // we repay debt to set it to targetLTV
-            uint256 targetDebtUsd = targetLTV * collateralInUsd / MAX_BPS;
+            uint256 targetDebtUsd = targetLTV * collateralInUsd / 1e18;
             //Check for apr calculations
             uint256 amountToRepayUsd =
                 targetDebtUsd < debtInUsd
                     ? debtInUsd - targetDebtUsd
                     : 0;
 
-            uint256 amountToRepayIT =
+            uint256 amountToRepayBT =
                 _fromUsd(amountToRepayUsd, baseToken);
-            uint256 withdrawnIT = _withdrawFromYVault(amountToRepayIT); // we withdraw from BaseToken vault
-            _repayTokenDebt(withdrawnIT); // we repay the BaseToken debt with compound
+            uint256 withdrawnBT = _withdrawFromYVault(amountToRepayBT); // we withdraw from BaseToken vault
+            _repayTokenDebt(withdrawnBT); // we repay the BaseToken debt with compound
         }
 
         if (balanceOfBaseToken() > 0) {
@@ -362,9 +363,9 @@ contract Strategy is BaseStrategy {
         // NOTE: collateral and debt calcs are done in ETH (always, see compound docs)
 
         // We first repay whatever we need to repay to keep healthy ratios
-        uint256 amountToRepayIT = _calculateAmountToRepay(_amountNeeded);
-        uint256 withdrawnIT = _withdrawFromYVault(amountToRepayIT); // we withdraw from BaseToken vault
-        _repayTokenDebt(withdrawnIT); // we repay the BaseToken debt with compound
+        uint256 amountToRepayBT = _calculateAmountToRepay(_amountNeeded);
+        uint256 withdrawnBT = _withdrawFromYVault(amountToRepayBT); // we withdraw from BaseToken vault
+        _repayTokenDebt(withdrawnBT); // we repay the BaseToken debt with compound
 
         // it will return the free amount of want
         _withdrawWant(_amountNeeded);
@@ -374,21 +375,21 @@ contract Strategy is BaseStrategy {
         if (
             _amountNeeded > balance &&
             balanceOfDebt() > 0 && // still some debt remaining
-            balanceOfBaseToken() + balanceofVault() == 0 && // but no capital to repay
+            balanceOfBaseToken() + balanceOfVault() == 0 && // but no capital to repay
             !leaveDebtBehind // if set to true, the strategy will not try to repay debt by selling want
         ) {
             // using this part of code will result in losses but it is necessary to unlock full collateral in case of wind down
             // we calculate how much want we need to fulfill the want request
             uint256 remainingAmountWant = _amountNeeded - balance;
             // then calculate how much BaseToken we need to unlock collateral
-            amountToRepayIT = _calculateAmountToRepay(remainingAmountWant);
+            amountToRepayBT = _calculateAmountToRepay(remainingAmountWant);
 
             // we buy BaseToken with Want
-            _buyBaseTokenWithWant(amountToRepayIT);
+            _buyBaseTokenWithWant(amountToRepayBT);
 
             // we repay debt to actually unlock collateral
             // after this, balanceOfDebt should be 0
-            _repayTokenDebt(amountToRepayIT);
+            _repayTokenDebt(amountToRepayBT);
 
             // then we try withdraw once more
             _withdrawWant(remainingAmountWant);
@@ -440,7 +441,7 @@ contract Strategy is BaseStrategy {
         uint256 debtInUsd = _toUsd(balanceOfDebt(), baseToken);
         uint256 currentLiquidationThreshold = getLiquidateCollateralFactor();
 
-        uint256 currentLTV = debtInUsd * MAX_BPS / collateralInUsd;
+        uint256 currentLTV = debtInUsd * 1e18 / collateralInUsd;
         uint256 targetLTV = _getTargetLTV(currentLiquidationThreshold);
         uint256 warningLTV = _getWarningLTV(currentLiquidationThreshold);
 
@@ -461,8 +462,6 @@ contract Strategy is BaseStrategy {
 
     // ----------------- INTERNAL FUNCTIONS SUPPORT -----------------
 
-    // ------------------ YEARN VAULT FUNCTIONS --------------------- \\
-    
     function _withdrawFromYVault(uint256 _amountIT) internal returns (uint256) {
         if (_amountIT == 0) {
             return 0;
@@ -481,6 +480,141 @@ contract Strategy is BaseStrategy {
         return balanceOfBaseToken() - balancePrior;
     }
 
+    /*
+    * Supply an asset that this contract holds to Compound III
+    * This is used both to supply collateral as well as the baseToken
+    */
+    function _supply(address asset, uint amount) internal {
+        if (amount == 0) return;
+        comet.supply(asset, amount);
+    }
+
+    /*
+    * Withdraws an asset from Compound III to this contract
+    * for both collateral and borrowing baseToken
+    */
+    function _withdraw(address asset, uint amount) internal {
+        if (amount == 0) return;
+        comet.withdraw(asset, amount);
+    }
+
+    /*
+    * Repays an entire borrow of the base asset from Compound III
+    */
+    function _repayFullBorrow() internal {
+        comet.supply(baseToken, type(uint256).max);
+    }
+
+    function _repayTokenDebt(uint256 amount) internal {
+        if (amount == 0) {
+            return;
+        }
+
+        // we cannot pay more than loose balance
+        amount = Math.min(amount, balanceOfBaseToken());
+        // we cannot pay more than we owe
+        amount = Math.min(amount, balanceOfDebt());
+        _supply(baseToken, amount);
+    }
+
+    //withdraw an amount including any want balance
+    function _withdrawWant(uint256 amount) internal {
+        uint256 toWithdraw = Math.min(amount, _maxWithdrawal());
+
+        _withdraw(address(want), toWithdraw);
+    }
+
+    function _maxWithdrawal() internal view returns (uint256) {
+        uint256 collateralInUsd = _toUsd(balanceOfCollateral(), address(want));
+        uint256 debtInUsd = _toUsd(balanceOfDebt(), baseToken);
+
+        uint256 ltv = debtInUsd * 1e18 / collateralInUsd;
+
+        uint256 minCollateralUsd =
+            ltv > 0 ? debtInUsd * 1e18 / ltv : collateralInUsd;
+        if (minCollateralUsd > collateralInUsd) {
+            return 0;
+        }
+        //Return either our collateral balance or based off ltv
+        return
+            _fromUsd(collateralInUsd - minCollateralUsd, address(want));
+    }
+
+    function _calculateAmountToRepay(uint256 amount)
+        internal
+        view
+        returns (uint256)
+    {
+        if (amount == 0) {
+            return 0;
+        }
+        // we check if the collateral that we are withdrawing leaves us in a risky range, we then take action
+        uint256 newCollateral = _toUsd(balanceOfCollateral() - amount, address(want));
+        uint256 targetLTV = _getTargetLTV(getLiquidateCollateralFactor());
+        uint256 debtInUsd = _toUsd(balanceOfDebt(), baseToken);
+
+        uint256 targetDebtUsd = newCollateral * targetLTV / 1e18;
+        return _fromUsd(debtInUsd - targetDebtUsd, baseToken);
+    }
+
+    // ----------------- INTERNAL CALCS -----------------
+
+    //Returns the _amount of _token in terms of USD, i.e 1e8
+    function _toUsd(uint256 _amount, address _token) internal view returns(uint256) {
+        if(_amount == 0 || _amount == type(uint256).max) return _amount;
+        uint256 usdPrice = getCompoundPrice(getPriceFeedAddress(_token));
+        //usd price is returned as 1e8
+        return _amount * usdPrice / (10 ** IERC20Extended(_token).decimals());
+    }
+
+    //Returns the _amount of usd (1e8) in terms of want
+    function _fromUsd(uint256 _amount, address _token) internal view returns(uint256) {
+        if(_amount == 0 || _amount == type(uint256).max) return _amount;
+        uint256 usdPrice = getCompoundPrice(getPriceFeedAddress(_token));
+        return _amount * (10 ** IERC20Extended(_token).decimals()) / usdPrice;
+    }
+
+    function balanceOfWant() public view returns (uint256) {
+        return want.balanceOf(address(this));
+    }
+
+    function balanceOfCollateral() public view returns (uint256) {
+        return uint256(comet.userCollateral(address(this), address(want)).balance);
+    }
+
+    function balanceOfBaseToken() public view returns(uint256) {
+        return IERC20(baseToken).balanceOf(address(this));
+    }
+
+    function balanceOfVault() public view returns(uint256) {
+        return yVault.balanceOf(address(this)) * yVault.pricePerShare() / (10**yVault.decimals());
+    }
+
+    function balanceOfDebt() public view returns (uint256) {
+        return comet.borrowBalanceOf(address(this));
+    }
+
+    //Returns the negative position of base token. i.e. borrowed - supplied
+    //if for some reason supplied is higher it will return 0
+    function baseTokenOwedBalance() public view returns(uint256) {
+        uint256 supplied = balanceOfVault();
+        uint256 borrowed = balanceOfDebt();
+        uint256 loose = balanceOfBaseToken();
+        
+        //If they are the same or supply > debt return 0
+        if(supplied + loose >= borrowed) return 0;
+
+        return borrowed - supplied - loose;
+    }
+
+    function baseTokenOwedInWant() public view returns(uint256) {
+        return _fromUsd(_toUsd(baseTokenOwedBalance(), baseToken), address(want));
+    }
+
+    function rewardsInWant() public view returns(uint256) {
+        return _fromUsd(_toUsd(getRewardsOwed(), comp), address(want)) * 9_000 / MAX_BPS;
+    }
+
     function _baseTokenToYShares(uint256 amount)
         internal
         view
@@ -488,6 +622,85 @@ contract Strategy is BaseStrategy {
     {
         return amount * (10**yVault.decimals()) / yVault.pricePerShare();
     }
+
+    /*
+    * Get the current borrow APR in Compound III
+    */
+    function getBorrowApr(uint256 newAmount) public view returns (uint) {
+        uint256 borrows = comet.totalBorrow();
+        uint256 supply = comet.totalSupply();
+
+        uint256 newUtilization = (borrows + newAmount) * 1e18 / supply;
+        //uint utilization = comet.getUtilization();
+        return comet.getBorrowRate(newUtilization) * SECONDS_PER_YEAR;  
+    }
+
+    /*
+    * Get the current reward for borrowing APR in Compound III
+    * @param rewardTokenPriceFeed The address of the reward token (e.g. COMP) price feed
+    * @return The reward APR in USD as a decimal scaled up by 1e18
+    */
+    function getRewardAprForBorrowBase(uint newAmount) public view returns (uint) {
+        uint rewardTokenPriceInUsd = getCompoundPrice(getPriceFeedAddress(comp));
+        uint basePriceInUsd = getCompoundPrice(comet.baseTokenPriceFeed());
+        uint baseTotalBorrow = comet.totalBorrow() + newAmount;
+        uint baseTrackingBorrowSpeed = comet.baseTrackingBorrowSpeed();
+        uint rewardToBorrowersPerDay = baseTrackingBorrowSpeed * SECONDS_PER_DAY * (BASE_INDEX_SCALE / BASE_MANTISSA);
+        uint borrowBaseRewardApr = (rewardTokenPriceInUsd * rewardToBorrowersPerDay / (baseTotalBorrow * basePriceInUsd)) * DAYS_PER_YEAR;
+        return borrowBaseRewardApr;
+    }
+
+    //Returns the supply cap of the want token
+    function getSupplyCap() internal view returns(uint256) {
+        return uint256(comet.getAssetInfoByAddress(address(want)).supplyCap);
+    }
+
+    /*
+    * Get the liquidation collateral factor for an asset
+    */
+    function getLiquidateCollateralFactor() public view returns (uint256) {
+        return uint256(comet.getAssetInfoByAddress(address(want)).liquidateCollateralFactor);
+    }
+
+    /*
+    * Get the price feed address for an asset
+    */
+    function getPriceFeedAddress(address asset) public view returns (address) {
+        if(asset == baseToken) return comet.baseTokenPriceFeed();
+        return comet.getAssetInfoByAddress(asset).priceFeed;
+    }
+
+    /*
+    * Get the current price of an asset from the protocol's persepctive
+    */
+    function getCompoundPrice(address singleAssetPriceFeed) public view returns (uint) {
+        return comet.getPrice(singleAssetPriceFeed);
+    }
+
+    function delegatedAssets() external view override returns (uint256) {
+        // returns total debt borrowed in want (which is the delegatedAssets)
+        return _fromUsd(_toUsd(balanceOfVault(), baseToken), address(want));
+    }
+
+    function _getTargetLTV(uint256 liquidationThreshold)
+        internal
+        view
+        returns (uint256)
+    {
+        return
+            liquidationThreshold * uint256(targetLTVMultiplier) / MAX_BPS;
+    }
+
+    function _getWarningLTV(uint256 liquidationThreshold)
+        internal
+        view
+        returns (uint256)
+    {
+        return
+            liquidationThreshold * uint256(warningLTVMultiplier) / MAX_BPS;
+    }
+
+    // ----------------- TOKEN CONVERSIONS -----------------
 
     function _claimAndSellRewards() internal {
         _claimRewards();
@@ -502,11 +715,11 @@ contract Strategy is BaseStrategy {
 
             bytes memory path =
                 abi.encodePacked(
-                    comp, // comp-ETH
-                    compToEthFee,
-                    weth, // ETH-want
-                    ethToBaseFee,
-                    baseToken
+                    baseToken, 
+                    ethToBaseFee,// base-ETH
+                    weth, 
+                    compToEthFee, // ETH-want
+                    comp
                     );
 
             // Proceeds from Comp are not subject to minExpectedSwapPercentage
@@ -517,7 +730,7 @@ contract Strategy is BaseStrategy {
                     address(this),
                     block.timestamp,
                     baseNeeded, //How much we want out
-                    0
+                    compBalance
                 )
             );
         }
@@ -573,7 +786,16 @@ contract Strategy is BaseStrategy {
     * Gets the amount of reward tokens due to this contract address
     */
     function getRewardsOwed() public view returns (uint) {
-        return comet.userBasic(address(this)).baseTrackingAccrued;
+        CometStructs.RewardConfig memory config = rewardsContract.rewardConfig(address(comet));
+        uint256 accrued = comet.baseTrackingAccrued(address(this));
+        if (config.shouldUpscale) {
+            accrued *= config.rescaleFactor;
+        } else {
+            accrued /= config.rescaleFactor;
+        }
+        uint256 claimed = rewardsContract.rewardsClaimed(address(comet), address(this));
+
+        return accrued > claimed ? accrued - claimed : 0;
     }
 
     function claimRewards() external onlyKeepers {
@@ -584,218 +806,11 @@ contract Strategy is BaseStrategy {
         rewardsContract.claim(address(comet), address(this), true);
     }
 
-    /*
-    * Supply an asset that this contract holds to Compound III
-    * This is used both to supply collateral as well as the baseToken
-    */
-    function _supply(address asset, uint amount) internal {
-        if (amount == 0) return;
-        comet.supply(asset, amount);
-    }
-
-    /*
-    * Withdraws an asset from Compound III to this contract
-    * for both collateral and borrowing baseToken
-    */
-    function _withdraw(address asset, uint amount) internal {
-        if (amount == 0) return;
-        comet.withdraw(asset, amount);
-    }
-
-    /*
-    * Repays an entire borrow of the base asset from Compound III
-    */
-    function _repayFullBorrow() internal {
-        comet.supply(baseToken, type(uint256).max);
-    }
-
-    /*
-    * Get the current borrow APR in Compound III
-    */
-    function getBorrowApr(uint256 newAmount) public view returns (uint) {
-        uint256 borrows = comet.totalBorrow();
-        uint256 supply = comet.totalSupply();
-
-        uint256 newUtilization = (borrows + newAmount) * 1e18 / supply;
-        //uint utilization = comet.getUtilization();
-        return comet.getBorrowRate(newUtilization) * SECONDS_PER_YEAR * 100;  
-    }
-
-    /*
-    * Get the current reward for borrowing APR in Compound III
-    * @param rewardTokenPriceFeed The address of the reward token (e.g. COMP) price feed
-    * @return The reward APR in USD as a decimal scaled up by 1e18
-    */
-    function getRewardAprForBorrowBase(uint newAmount) public view returns (uint) {
-        uint rewardTokenPriceInUsd = getCompoundPrice(getPriceFeedAddress(comp));
-        uint basePriceInUsd = getCompoundPrice(comet.baseTokenPriceFeed());
-        uint baseTotalBorrow = comet.totalBorrow() + newAmount;
-        uint baseTrackingBorrowSpeed = comet.baseTrackingBorrowSpeed();
-        uint rewardToBorrowersPerDay = baseTrackingBorrowSpeed * SECONDS_PER_DAY * (BASE_INDEX_SCALE / BASE_MANTISSA);
-        uint borrowBaseRewardApr = (rewardTokenPriceInUsd * rewardToBorrowersPerDay / (baseTotalBorrow * basePriceInUsd)) * DAYS_PER_YEAR;
-        return borrowBaseRewardApr;
-    }
-
-    //Returns the supply cap of the want token
-    function getSupplyCap() internal view returns(uint256) {
-        return uint256(comet.getAssetInfoByAddress(address(want)).supplyCap);
-    }
-
-    /*
-    * Get the borrow collateral factor for an asset
-    */
-    function getBorrowCollateralFactor() public view returns (uint256) {
-        return uint256(comet.getAssetInfoByAddress(address(want)).borrowCollateralFactor);
-    }
-
-    /*
-    * Get the liquidation collateral factor for an asset
-    */
-    function getLiquidateCollateralFactor() public view returns (uint256) {
-        return uint256(comet.getAssetInfoByAddress(address(want)).liquidateCollateralFactor);
-    }
-
-    /*
-    * Get the price feed address for an asset
-    */
-    function getPriceFeedAddress(address asset) public view returns (address) {
-        if(asset == baseToken) return comet.baseTokenPriceFeed();
-        return comet.getAssetInfoByAddress(asset).priceFeed;
-    }
-
-    /*
-    * Get the current price of an asset from the protocol's persepctive
-    */
-    function getCompoundPrice(address singleAssetPriceFeed) public view returns (uint) {
-        return comet.getPrice(singleAssetPriceFeed);
-    }
-
-    function _repayTokenDebt(uint256 amount) internal {
-        if (amount == 0) {
-            return;
-        }
-
-        // we cannot pay more than loose balance
-        amount = Math.min(amount, balanceOfBaseToken());
-        // we cannot pay more than we owe
-        amount = Math.min(amount, balanceOfDebt());
-    }
-
-    //withdraw an amount including any want balance
-    function _withdrawWant(uint256 amount) internal {
-        uint256 toWithdraw = Math.min(amount, _maxWithdrawal());
-
-        _withdraw(address(want), toWithdraw);
-    }
-
-    function _maxWithdrawal() internal view returns (uint256) {
-        uint256 collateralInUsd = _toUsd(balanceOfCollateral(), address(want));
-        uint256 debtInUsd = _toUsd(balanceOfDebt(), baseToken);
-
-        uint256 ltv = debtInUsd * MAX_BPS / collateralInUsd;
-
-        uint256 minCollateralUsd =
-            ltv > 0 ? debtInUsd * MAX_BPS / ltv : collateralInUsd;
-        if (minCollateralUsd > collateralInUsd) {
-            return 0;
-        }
-        //Return either our collateral balance or based off ltv
-        return
-            _fromUsd(collateralInUsd - minCollateralUsd, address(want));
-    }
-
-    function _calculateAmountToRepay(uint256 amount)
-        internal
-        view
-        returns (uint256)
-    {
-        if (amount == 0) {
-            return 0;
-        }
-        // we check if the collateral that we are withdrawing leaves us in a risky range, we then take action
-        uint256 newCollateral = _toUsd(balanceOfCollateral() - amount, address(want));
-        uint256 targetLTV = _getTargetLTV(getLiquidateCollateralFactor());
-        uint256 debtInUsd = _toUsd(balanceOfDebt(), baseToken);
-
-        uint256 targetDebtUsd = newCollateral * targetLTV / 1e18;
-        return _fromUsd(debtInUsd - targetDebtUsd, baseToken);
-    }
-
-    function _checkAllowance(
-        address _contract,
-        address _token,
-        uint256 _amount
-    ) internal {
-        if (IERC20(_token).allowance(address(this), _contract) < _amount) {
-            IERC20(_token).safeApprove(_contract, 0);
-            IERC20(_token).safeApprove(_contract, type(uint256).max);
-        }
-    }
-
-    // ----------------- INTERNAL CALCS -----------------
-    function balanceOfWant() public view returns (uint256) {
-        return want.balanceOf(address(this));
-    }
-
-    function balanceOfCollateral() public view returns (uint256) {
-        return uint256(comet.userCollateral(address(this), address(want)).balance);
-    }
-
-    function balanceOfBaseToken() public view returns(uint256) {
-        return IERC20(baseToken).balanceOf(address(this));
-    }
-
-    function balanceofVault() public view returns(uint256) {
-        return yVault.balanceOf(address(this)) * yVault.pricePerShare() / (10**yVault.decimals());
-    }
-
-    function balanceOfDebt() public view returns (uint256) {
-        return comet.borrowBalanceOf(address(this));
-    }
-
-    //Returns the negative position of base token. i.e. borrowed - supplied
-    //if for some reason supplied is higher it will return 0
-    function baseTokenOwedBalance() public view returns(uint256) {
-        uint256 supplied = balanceofVault();
-        uint256 borrowed = balanceOfDebt();
-        uint256 loose = balanceOfBaseToken();
-        
-        //If they are the same or supply > debt return 0
-        if(supplied + loose >= borrowed) return 0;
-
-        return borrowed - supplied - loose;
-    }
-
-    function delegatedAssets() external view override returns (uint256) {
-        // returns total debt borrowed in want (which is the delegatedAssets)
-        return _fromUsd(_toUsd(balanceofVault(), baseToken), address(want));
-    }
-
-    function _getTargetLTV(uint256 liquidationThreshold)
-        internal
-        view
-        returns (uint256)
-    {
-        return
-            liquidationThreshold * uint256(targetLTVMultiplier) / MAX_BPS;
-    }
-
-    function _getWarningLTV(uint256 liquidationThreshold)
-        internal
-        view
-        returns (uint256)
-    {
-        return
-            liquidationThreshold * uint256(warningLTVMultiplier) / MAX_BPS;
-    }
-
-    // ----------------- TOKEN CONVERSIONS -----------------
-
     function _buyBaseTokenWithWant(uint256 _amount) internal {
         if (_amount == 0) {
             return;
         }
-
+        uint256 maxWantBalance = _fromUsd(_toUsd(_amount, baseToken), address(want)) * 9800 / MAX_BPS;
         _checkAllowance(address(router), address(want), _amount);
         if(address(want) == weth || baseToken == weth) {
             ISwapRouter.ExactOutputSingleParams memory params =
@@ -806,7 +821,7 @@ contract Strategy is BaseStrategy {
                     address(this), // recipient
                     block.timestamp, // deadline
                     _amount, // amountOut
-                    0, // amountIn
+                    maxWantBalance, // amountIn
                     0 // sqrtPriceLimitX96
                 );
 
@@ -822,19 +837,29 @@ contract Strategy is BaseStrategy {
                     baseToken // token out
                 );
 
-            // Proceeds from Comp are not subject to minExpectedSwapPercentage
-            // so they could get sandwiched if we end up in an uncle block
             router.exactOutput(
                 ISwapRouter.ExactOutputParams(
                     path,
                     address(this),
                     block.timestamp,
                     _amount,
-                    0
+                    maxWantBalance
                 )
             );
         }
     }
+
+    function _checkAllowance(
+        address _contract,
+        address _token,
+        uint256 _amount
+    ) internal {
+        if (IERC20(_token).allowance(address(this), _contract) < _amount) {
+            IERC20(_token).safeApprove(_contract, 0);
+            IERC20(_token).safeApprove(_contract, type(uint256).max);
+        }
+    }
+
 
     function ethToWant(uint256 _amtInWei)
         public
@@ -843,27 +868,6 @@ contract Strategy is BaseStrategy {
         returns (uint256)
     {
         return _fromUsd(_toUsd(_amtInWei, weth), address(want));
-    }
-
-    //Returns the _amount of _token in terms of USD, i.e 1e8
-    function _toUsd(uint256 _amount, address _token) internal view returns(uint256) {
-        uint256 usdPrice = getCompoundPrice(getPriceFeedAddress(_token));
-        //usd price is returned as 1e8
-        return _amount * usdPrice / IERC20Extended(_token).decimals();
-    }
-
-    //Returns the _amount of usd (1e8) in terms of want
-    function _fromUsd(uint256 _amount, address _token) internal view returns(uint256) {
-        uint256 usdPrice = getCompoundPrice(getPriceFeedAddress(_token));
-        return _amount * IERC20Extended(_token).decimals() / usdPrice;
-    }
-
-    function baseTokenOwedInWant() public view returns(uint256) {
-        return _fromUsd(_toUsd(baseTokenOwedBalance(), baseToken), address(want));
-    }
-
-    function rewardsInWant() public view returns(uint256) {
-        return _fromUsd(_toUsd(getRewardsOwed(), comp), address(want)) * 9_000 / MAX_BPS;
     }
 
     function protectedTokens()

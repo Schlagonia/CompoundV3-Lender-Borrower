@@ -44,7 +44,7 @@ def test_increase_costs(
         strategy.warningLTVMultiplier(),
         acceptable,
         0,
-        strategy.maxTotalBorrowIT(),
+        strategy.maxTotalBorrowBT(),
         strategy.isWantIncentivised(),
         strategy.isInvestmentTokenIncentivised(),
         strategy.leaveDebtBehind(),
@@ -89,7 +89,7 @@ def test_increase_costs(
         strategy.warningLTVMultiplier(),
         0,  # set accceptable costs to 0
         0,
-        strategy.maxTotalBorrowIT(),
+        strategy.maxTotalBorrowBT(),
         strategy.isWantIncentivised(),
         strategy.isInvestmentTokenIncentivised(),
         strategy.leaveDebtBehind(),

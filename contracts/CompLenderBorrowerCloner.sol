@@ -39,7 +39,7 @@ contract CompV3LenderBorrowerCloner {
         return "Yearn-CompV3LenderBorrowerCloner@0.4.3";
     }
 
-    function cloneAaveLenderBorrower(
+    function cloneCompV3LenderBorrower(
         address _vault,
         address _strategist,
         address _rewards,
