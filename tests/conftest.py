@@ -43,12 +43,12 @@ def keeper(accounts):
 
 
 @pytest.fixture
-def amount(accounts, token, user):
-    amount = 10_000 * 10 ** token.decimals()
+def amount(accounts, token, token_whale):
+    amount = 5 * 10 ** token.decimals()
     # In order to get some funds for the token you are about to use,
     # it impersonate an exchange address to use it's funds.
     reserve = accounts.at("0xba12222222228d8ba445958a75a0704d566bf2c8", force=True)
-    token.transfer(user, amount, {"from": reserve})
+    token.transfer(token_whale, amount, {"from": reserve})
     yield amount
 
 
@@ -117,14 +117,14 @@ def token(wbtc):
         "yvSUSD"
     ],
 )
-def yVault():
+def yvault():
     vault = Contract("0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE")
     yield vault
 
 
 @pytest.fixture
-def borrow_token(yVault):
-    yield Contract(yVault.token())
+def borrow_token(yvault):
+    yield Contract(yvault.token())
 
 
 whales = {
@@ -211,7 +211,7 @@ def cloner(
     strategist,
     vault,
     CompV3LenderBorrowerCloner,
-    yVault,
+    yvault,
     comet,
     ethToWantFee,
     token,
@@ -222,7 +222,7 @@ def cloner(
         vault,
         comet,
         ethToWantFee,
-        yVault,
+        yvault,
         f"Strategy{token.symbol()}Lender{baseToken.symbol()}Borrower",
     )
 

@@ -36,9 +36,6 @@ contract Strategy is BaseStrategy {
     uint public BASE_MANTISSA;
     uint public BASE_INDEX_SCALE;
 
-    // max amount to borrow. used to manually limit amount (for yVault to keep APY)
-    uint256 public maxTotalBorrowBT;
-
     // if set to true, the strategy will not try to repay debt by selling want
     bool public leaveDebtBehind;
 
@@ -78,6 +75,7 @@ contract Strategy is BaseStrategy {
 
     //Needs to be set to at least comet.baseBorrowMin()
     uint256 internal minThreshold;
+    uint256 public minToSell;
     uint256 public maxLoss;
     uint256 public maxGasPriceToTend;
     string internal strategyName;
@@ -103,7 +101,7 @@ contract Strategy is BaseStrategy {
     function setStrategyParams(
         uint16 _targetLTVMultiplier,
         uint16 _warningLTVMultiplier,
-        uint256 _maxTotalBorrowBT,
+        uint256 _minToSell,
         bool _leaveDebtBehind,
         uint256 _maxLoss,
         uint256 _maxGasPriceToTend
@@ -114,7 +112,7 @@ contract Strategy is BaseStrategy {
         );
         targetLTVMultiplier = _targetLTVMultiplier;
         warningLTVMultiplier = _warningLTVMultiplier;
-        maxTotalBorrowBT = _maxTotalBorrowBT;
+        minToSell = _minToSell;
         leaveDebtBehind = _leaveDebtBehind;
         maxGasPriceToTend = _maxGasPriceToTend;
 
@@ -207,8 +205,11 @@ contract Strategy is BaseStrategy {
         //This will accrue the account as well so all future calls are accurate
         _claimAndSellRewards();
 
-        //rewards in want and base token owed should be 0 here
-        uint256 totalAssetsAfterProfit = estimatedTotalAssets();
+        //base token owed should be 0 here but we count it just in case
+        uint256 totalAssetsAfterProfit = 
+            balanceOfWant() + 
+                balanceOfCollateral() -
+                    baseTokenOwedInWant();
 
         _profit = totalAssetsAfterProfit > totalDebt ? totalAssetsAfterProfit - totalDebt : 0;
 
@@ -240,9 +241,13 @@ contract Strategy is BaseStrategy {
         // if we have enough want to deposit more, we do
         // NOTE: we do not skip the rest of the function if we don't as it may need to repay or take on more debt
         if (wantBalance > _debtOutstanding) {
-            uint256 amountToDeposit = wantBalance - _debtOutstanding;
-            amountToDeposit = Math.min(amountToDeposit, getSupplyCap() - uint256(comet.totalsCollateral(address(want)).totalSupplyAsset));
-            _supply(address(want), amountToDeposit);
+            _supply(
+                address(want),
+                Math.min(
+                    wantBalance - _debtOutstanding, 
+                    //Check supply cap wont be reached for want
+                    getSupplyCap() - uint256(comet.totalsCollateral(address(want)).totalSupplyAsset)
+            ));
         }
 
         // NOTE: debt + collateral calcs are done in USD
@@ -272,8 +277,6 @@ contract Strategy is BaseStrategy {
         // maxProtocolDebt => amount of total debt at which the cost of capital is equal to our acceptable costs
         // if the current protocol debt is higher than the max protocol debt, we will repay debt
 
-        uint256 currentProtocolDebt = comet.totalBorrow();
-        uint256 maxProtocolDebt = comet.totalSupply();
         uint256 currentBorrowApr = getBorrowApr(0);
         uint256 currentRewardApr = getRewardAprForBorrowBase(0);
 
@@ -286,20 +289,13 @@ contract Strategy is BaseStrategy {
                 collateralInUsd * targetLTV / 1e18;
 
             uint256 amountToBorrowUsd = targetDebtUsd - debtInUsd; // safe bc we checked ratios
-
+            uint256 currentProtocolDebt = comet.totalBorrow();
+            uint256 maxProtocolDebt = comet.totalSupply();
             // cap the amount of debt we are taking according to our acceptable costs
             // if with the new loan we are increasing our cost of capital over what is healthy
             if (currentProtocolDebt + _fromUsd(amountToBorrowUsd, baseToken) > maxProtocolDebt) {
                 // Can't underflow because it's checked in the previous if condition
                 amountToBorrowUsd = _toUsd(maxProtocolDebt - currentProtocolDebt, baseToken);
-            }
-
-            uint256 maxTotalBorrowUsd =
-                _toUsd(maxTotalBorrowBT, baseToken);
-            if (debtInUsd + amountToBorrowUsd > maxTotalBorrowUsd) {
-                amountToBorrowUsd = maxTotalBorrowUsd > debtInUsd
-                    ? maxTotalBorrowUsd - debtInUsd
-                    : 0;
             }
 
             //We want to make sure that the reward apr > borrow apr so we dont reprot a loss
@@ -312,27 +308,25 @@ contract Strategy is BaseStrategy {
             // convert to BaseToken
             uint256 amountToBorrowBT =
                 _fromUsd(amountToBorrowUsd, baseToken);
-
-            if (amountToBorrowBT > minThreshold) {
+            //Need to have at least a min set by comet
+            if (balanceOfDebt() + amountToBorrowBT > minThreshold) {
                 _withdraw(baseToken, amountToBorrowBT);
             }
-        } else if (
-            currentLTV > warningLTV || currentBorrowApr > currentRewardApr
-        ) {
+        } else if (currentLTV > warningLTV) {
             // UNHEALTHY RATIO
             // we may be in this case if the current cost of capital is higher than our max cost of capital
             // we repay debt to set it to targetLTV
             uint256 targetDebtUsd = targetLTV * collateralInUsd / 1e18;
             //Check for apr calculations
-            uint256 amountToRepayUsd =
-                targetDebtUsd < debtInUsd
-                    ? debtInUsd - targetDebtUsd
-                    : 0;
+            uint256 amountToRepayUsd = debtInUsd - targetDebtUsd;
 
             uint256 amountToRepayBT =
                 _fromUsd(amountToRepayUsd, baseToken);
             uint256 withdrawnBT = _withdrawFromYVault(amountToRepayBT); // we withdraw from BaseToken vault
             _repayTokenDebt(withdrawnBT); // we repay the BaseToken debt with compound
+        } else if(currentBorrowApr > currentRewardApr) {
+            //Liquidate everything so not to report a loss
+            liquidatePosition(estimatedTotalAssets());
         }
 
         if (balanceOfBaseToken() > 0) {
@@ -360,12 +354,12 @@ contract Strategy is BaseStrategy {
         }
         // NOTE: amountNeeded is in want
         // NOTE: repayment amount is in BaseToken
-        // NOTE: collateral and debt calcs are done in ETH (always, see compound docs)
+        // NOTE: collateral and debt calcs are done in USD
 
         // We first repay whatever we need to repay to keep healthy ratios
         uint256 amountToRepayBT = _calculateAmountToRepay(_amountNeeded);
-        uint256 withdrawnBT = _withdrawFromYVault(amountToRepayBT); // we withdraw from BaseToken vault
-        _repayTokenDebt(withdrawnBT); // we repay the BaseToken debt with compound
+        // we repay the BaseToken debt with the amount withdrawn from the vault
+        _repayTokenDebt(_withdrawFromYVault(amountToRepayBT)); 
 
         // it will return the free amount of want
         _withdrawWant(_amountNeeded);
@@ -385,29 +379,32 @@ contract Strategy is BaseStrategy {
             amountToRepayBT = _calculateAmountToRepay(remainingAmountWant);
 
             // we buy BaseToken with Want
-            _buyBaseTokenWithWant(amountToRepayBT);
+            _buyBaseTokenWithWant(balanceOfDebt());
 
             // we repay debt to actually unlock collateral
             // after this, balanceOfDebt should be 0
-            _repayTokenDebt(amountToRepayBT);
+            _repayTokenDebt(balanceOfDebt());
 
             // then we try withdraw once more
             _withdrawWant(remainingAmountWant);
         }
 
-        uint256 totalAssets = balanceOfWant();
-        if (_amountNeeded > totalAssets) {
-            _liquidatedAmount = totalAssets;
-            _loss = _amountNeeded - totalAssets;
+        balance = balanceOfWant();
+        if (_amountNeeded > balance) {
+            _liquidatedAmount = balance;
+            _loss = _amountNeeded - balance;
         } else {
             _liquidatedAmount = _amountNeeded;
         }
     }
 
     function prepareMigration(address _newStrategy) internal override {
-        _claimAndSellRewards();
+        //Withraw from vault first to know exactly how much we need to pay back
         _withdrawFromYVault(yVault.balanceOf(address(this)));
-        _repayFullBorrow();
+        //Claim and sell all rewards to cover debt
+        _claimAndSellRewards();
+        //Pay back debt and withdrawal all collateral
+        _repayTokenDebt(type(uint256).max);
         _withdraw(address(want), _maxWithdrawal());
         
         uint256 baseBalance = balanceOfBaseToken();
@@ -462,15 +459,15 @@ contract Strategy is BaseStrategy {
 
     // ----------------- INTERNAL FUNCTIONS SUPPORT -----------------
 
-    function _withdrawFromYVault(uint256 _amountIT) internal returns (uint256) {
-        if (_amountIT == 0) {
+    function _withdrawFromYVault(uint256 _amountBT) internal returns (uint256) {
+        if (_amountBT == 0) {
             return 0;
         }
         // no need to check allowance bc the contract == token
         uint256 balancePrior = balanceOfBaseToken();
         uint256 sharesToWithdraw =
             Math.min(
-                _baseTokenToYShares(_amountIT),
+                _baseTokenToYShares(_amountBT),
                 yVault.balanceOf(address(this))
             );
         if (sharesToWithdraw == 0) {
@@ -498,13 +495,6 @@ contract Strategy is BaseStrategy {
         comet.withdraw(asset, amount);
     }
 
-    /*
-    * Repays an entire borrow of the base asset from Compound III
-    */
-    function _repayFullBorrow() internal {
-        comet.supply(baseToken, type(uint256).max);
-    }
-
     function _repayTokenDebt(uint256 amount) internal {
         if (amount == 0) {
             return;
@@ -512,7 +502,7 @@ contract Strategy is BaseStrategy {
 
         // we cannot pay more than loose balance
         amount = Math.min(amount, balanceOfBaseToken());
-        // we cannot pay more than we owe
+        // we do pay more than we owe
         amount = Math.min(amount, balanceOfDebt());
         _supply(baseToken, amount);
     }
@@ -528,16 +518,14 @@ contract Strategy is BaseStrategy {
         uint256 collateralInUsd = _toUsd(balanceOfCollateral(), address(want));
         uint256 debtInUsd = _toUsd(balanceOfDebt(), baseToken);
 
-        uint256 ltv = debtInUsd * 1e18 / collateralInUsd;
+        uint256 neededCollateralUsd = debtInUsd * 1e18 / _getTargetLTV(getLiquidateCollateralFactor());
 
-        uint256 minCollateralUsd =
-            ltv > 0 ? debtInUsd * 1e18 / ltv : collateralInUsd;
-        if (minCollateralUsd > collateralInUsd) {
+        if (neededCollateralUsd > collateralInUsd) {
             return 0;
         }
         //Return either our collateral balance or based off ltv
         return
-            _fromUsd(collateralInUsd - minCollateralUsd, address(want));
+            _fromUsd(collateralInUsd - neededCollateralUsd, address(want));
     }
 
     function _calculateAmountToRepay(uint256 amount)
@@ -549,12 +537,13 @@ contract Strategy is BaseStrategy {
             return 0;
         }
         // we check if the collateral that we are withdrawing leaves us in a risky range, we then take action
-        uint256 newCollateral = _toUsd(balanceOfCollateral() - amount, address(want));
+        uint256 newCollateralUsd = _toUsd(balanceOfCollateral() - amount, address(want));
         uint256 targetLTV = _getTargetLTV(getLiquidateCollateralFactor());
         uint256 debtInUsd = _toUsd(balanceOfDebt(), baseToken);
 
-        uint256 targetDebtUsd = newCollateral * targetLTV / 1e18;
-        return _fromUsd(debtInUsd - targetDebtUsd, baseToken);
+        uint256 targetDebtUsd = newCollateralUsd * targetLTV / 1e18;
+        //Repay only if our target debt is lower than our current debt
+        return targetDebtUsd < debtInUsd ? _fromUsd(debtInUsd - targetDebtUsd, baseToken) : 0;
     }
 
     // ----------------- INTERNAL CALCS -----------------
@@ -707,7 +696,7 @@ contract Strategy is BaseStrategy {
 
         uint256 compBalance = IERC20(comp).balanceOf(address(this));
 
-        if(compBalance == 0) return;
+        if(compBalance <= minToSell) return;
 
         uint256 baseNeeded = baseTokenOwedBalance();
 
@@ -737,7 +726,7 @@ contract Strategy is BaseStrategy {
 
         compBalance = IERC20(comp).balanceOf(address(this));
 
-        if(compBalance > 0) {
+        if(compBalance > minToSell) {
             _sellCompToWant(compBalance);
         }
     }
@@ -811,7 +800,7 @@ contract Strategy is BaseStrategy {
             return;
         }
         uint256 maxWantBalance = _fromUsd(_toUsd(_amount, baseToken), address(want)) * 9800 / MAX_BPS;
-        _checkAllowance(address(router), address(want), _amount);
+        _checkAllowance(address(router), address(want), maxWantBalance);
         if(address(want) == weth || baseToken == weth) {
             ISwapRouter.ExactOutputSingleParams memory params =
                 ISwapRouter.ExactOutputSingleParams(
@@ -830,11 +819,11 @@ contract Strategy is BaseStrategy {
         } else {
             bytes memory path =
                 abi.encodePacked(
-                    address(want), //Token in
-                    ethToWantFee,
-                    weth, // middle token
+                    baseToken, //Token out
                     ethToBaseFee,
-                    baseToken // token out
+                    weth, // middle token
+                    ethToWantFee,
+                    address(want) // token in
                 );
 
             router.exactOutput(

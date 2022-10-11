@@ -1,13 +1,13 @@
-from brownie import chain, reverts
+from brownie import chain, reverts, Contract
 import pytest
 
 
-def test_operation(token, vault, token_whale, strategy, strategist, RELATIVE_APPROX):
+def test_operation(token, vault, token_whale, strategy, strategist, amount, RELATIVE_APPROX):
     user_balance_before = token.balanceOf(token_whale)
 
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(500_000 * (10 ** token.decimals()), {"from": token_whale})
-    amount = 500_000 * (10 ** token.decimals())
+    vault.deposit(amount, {"from": token_whale})
+    #amount = 500_000 * (10 ** token.decimals())
     # Deposit to the vault
     assert token.balanceOf(vault.address) == amount
 
@@ -16,11 +16,9 @@ def test_operation(token, vault, token_whale, strategy, strategist, RELATIVE_APP
     strategy.harvest({"from": strategist})
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
 
-    # tend()
-    strategy.tend({"from": strategist})
-
     # withdrawal
-    vault.withdraw({"from": token_whale})
+    #vault.withdraw(vault.balanceOf(token_whale), token_whale, 10_000, {"from": token_whale})
+    vault.withdraw(vault.balanceOf(token_whale), token_whale, 10_000, {"from": token_whale})
     assert (
         pytest.approx(token.balanceOf(token_whale), rel=RELATIVE_APPROX)
         == user_balance_before
@@ -28,12 +26,11 @@ def test_operation(token, vault, token_whale, strategy, strategist, RELATIVE_APP
 
 
 def test_emergency_exit(
-    token, vault, strategy, token_whale, strategist, RELATIVE_APPROX
+    token, vault, strategy, token_whale, strategist, RELATIVE_APPROX, amount
 ):
     # Deposit to the vault
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(500_000 * (10 ** token.decimals()), {"from": token_whale})
-    amount = 500_000 * (10 ** token.decimals())
+    vault.deposit(amount, {"from": token_whale})
 
     chain.sleep(1)
     strategy.harvest({"from": strategist})
@@ -56,11 +53,12 @@ def test_profitable_harvest(
     borrow_token,
     borrow_whale,
     yvault,
+    amount
 ):
     # Deposit to the vault
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(500_000 * (10 ** token.decimals()), {"from": token_whale})
-    amount = 500_000 * (10 ** token.decimals())
+    vault.deposit(amount, {"from": token_whale})
+   
     assert token.balanceOf(vault.address) == amount
 
     # Harvest 1: Send funds through the strategy
@@ -90,16 +88,16 @@ def test_profitable_harvest(
 
 
 def test_change_debt(
-    gov, token, vault, token_whale, strategy, user, strategist, RELATIVE_APPROX
+    gov, token, vault, token_whale, strategy, user, strategist, RELATIVE_APPROX, amount
 ):
     # Deposit to the vault and harvest
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(500_000 * (10 ** token.decimals()), {"from": token_whale})
+    vault.deposit(amount, {"from": token_whale})
     vault.updateStrategyDebtRatio(strategy.address, 5_000, {"from": gov})
 
     chain.sleep(1)
     strategy.harvest({"from": gov})
-    amount = 500_000 * (10 ** token.decimals())
+
     half = int(amount / 2)
 
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == half
@@ -110,14 +108,14 @@ def test_change_debt(
 
     # In order to pass this tests, you will need to implement prepareReturn.
     # TODO: uncomment the following lines.
-    # vault.updateStrategyDebtRatio(strategy.address, 5_000, {"from": gov})
-    # strategy.harvest()
-    # assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == half
+    vault.updateStrategyDebtRatio(strategy.address, 5_000, {"from": gov})
+    strategy.harvest()
+    assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == half
 
 
-def test_sweep(gov, vault, strategy, token, token_whale, borrow_whale, borrow_token):
+def test_sweep(gov, vault, strategy, token, token_whale, borrow_whale, borrow_token, amount):
     # Strategy want token doesn't work
-    token.transfer(strategy, 500_000 * (10 ** token.decimals()), {"from": token_whale})
+    token.transfer(strategy, amount, {"from": token_whale})
     assert token.address == strategy.want()
     assert token.balanceOf(strategy) > 0
     with reverts("!want"):
@@ -144,14 +142,42 @@ def test_sweep(gov, vault, strategy, token, token_whale, borrow_whale, borrow_to
     )
 
 
-def test_triggers(gov, vault, strategy, token_whale, token):
+def test_triggers(gov, vault, strategy, token_whale, token, amount, accounts, comet):
     # Deposit to the vault and harvest
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(500_000 * (10 ** token.decimals()), {"from": token_whale})
-    vault.updateStrategyDebtRatio(strategy.address, 5_000, {"from": gov})
+    vault.deposit(amount, {"from": token_whale})
+    #vault.updateStrategyDebtRatio(strategy.address, 5_000, {"from": gov})
 
+    baseFee = Contract("0xb5e1CAcB567d98faaDB60a1fD4820720141f064F")
+    auth = accounts.at("0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7", force=True)
+    baseFee.setMaxAcceptableBaseFee(2000000000000, {"from": auth})
+    strategy.setProfitFactor(1000000000000000, {"from":gov})
+    strategy.setDebtThreshold(1000000000000000, {"from":gov})
+
+    assert strategy.tendTrigger(100) == False
+    assert strategy.harvestTrigger(100000) == True
     chain.sleep(1)
     strategy.harvest({"from": gov})
 
-    strategy.harvestTrigger(0)
-    strategy.tendTrigger(0)
+    assert strategy.harvestTrigger(100000) == False
+    assert strategy.tendTrigger(0) == False
+
+    strategy.setProfitFactor(1000000000000000, {"from":gov})
+
+    #pull funds out to get above warnfing value
+    borrowed = comet.borrowBalanceOf(strategy.address)
+    toBorrow = borrowed / 2
+    comet.withdraw(token.address, toBorrow)
+    assert strategy.tendTrigger(100) == True
+
+    strategy.tend({"from":gov})
+    assert strategy.tendTrigger(100) == False
+
+    #change the ltv
+    comet.supply(token_whale, strategy.address, token, amount)
+    assert strategy.tendTrigger(100) == True
+
+    strategy.tend({"from":gov})
+    assert strategy.tendTrigger(100) == False
+
+    

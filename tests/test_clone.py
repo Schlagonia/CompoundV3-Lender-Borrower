@@ -14,7 +14,7 @@ def test_clone(
     baseToken,
     comet,
     ethToWantFee,
-    yVault,
+    yvault,
     cloner,
 ):
 
@@ -25,7 +25,7 @@ def test_clone(
         keeper,
         comet,
         ethToWantFee,
-        yVault,
+        yvault,
         "StrategyCompLender" + token.symbol() + "Borrower" + baseToken.symbol(),
     )
     cloned_strategy = Contract.from_abi(
@@ -35,7 +35,7 @@ def test_clone(
     cloned_strategy.setStrategyParams(
         strategy.targetLTVMultiplier(),
         strategy.warningLTVMultiplier(),
-        strategy.maxTotalBorrowBT(),
+        strategy.minToSell(),
         strategy.leaveDebtBehind(),
         strategy.maxLoss(),
         strategy.maxGasPriceToTend(),
@@ -44,7 +44,7 @@ def test_clone(
 
     # should fail due to already initialized
     with reverts():
-        cloned_strategy.initialize(vault, comet, ethToWantFee, yVault, "NameRevert", {"from": gov})
+        cloned_strategy.initialize(vault, comet, ethToWantFee, yvault, "NameRevert", {"from": gov})
 
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
     vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
@@ -52,23 +52,23 @@ def test_clone(
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(1 * (10 ** token.decimals()), {"from": token_whale})
     strategy = cloned_strategy
-    print_debug(yVault, strategy, comet)
+    print_debug(yvault, strategy, comet)
     tx = strategy.harvest({"from": gov})
-    #assert yVault.balanceOf(strategy) > 0
-    print_debug(yVault, strategy, comet)
-    print_strat_status(strategy, vault, yVault)
+    #assert yvault.balanceOf(strategy) > 0
+    print_debug(yvault, strategy, comet)
+    print_strat_status(strategy, vault, yvault)
     # Sleep for 1 days
     chain.sleep(60 * 60 * 24)
     chain.mine(1)
 
     # Send some profit to yvETH
-    #baseToken.transfer(yVault, 1_000 * (10 ** baseToken.decimals()), {"from": borrow_whale})
+    #baseToken.transfer(yvault, 1_000 * (10 ** baseToken.decimals()), {"from": borrow_whale})
     comet.accrueAccount(strategy.address, {"from": gov})
-    print_strat_status(strategy, vault, yVault)
+    print_strat_status(strategy, vault, yvault)
     # TODO: check profits before and after
     strategy.harvest({"from": gov})
-    print_debug(yVault, strategy, comet)
-    print_strat_status(strategy, vault, yVault)
+    print_debug(yvault, strategy, comet)
+    print_strat_status(strategy, vault, yvault)
     # We should have profit after getting some profit from comp
     assert vault.strategies(strategy).dict()["totalGain"] > 0
     assert vault.strategies(strategy).dict()["totalLoss"] == 0
@@ -76,17 +76,16 @@ def test_clone(
     # Enough sleep for profit to be free
     chain.sleep(60 * 60 * 7)
     chain.mine(1)
-    print_debug(yVault, strategy, comet)
+    print_debug(yvault, strategy, comet)
 
     # why do we have losses? because of interests
     with reverts():
         vault.withdraw()
 
     # so we send profits
-    baseToken.transfer(yVault, 10_000e6, {"from": borrow_whale})
+    baseToken.transfer(yvault, 1_000e6, {"from": borrow_whale})
     vault.withdraw({"from": token_whale})
 
-"""
 def test_clone_of_weth(
     weth_vault,
     strategy,
@@ -100,7 +99,7 @@ def test_clone_of_weth(
     baseToken,
     comet,
     ethToWantFee,
-    yVault,
+    yvault,
     cloner,
 ):
     clone_tx = cloner.cloneCompV3LenderBorrower(
@@ -110,7 +109,7 @@ def test_clone_of_weth(
         keeper,
         comet,
         ethToWantFee,
-        yVault,
+        yvault,
         "StrategyCompLender" + weth.symbol() + "Borrower" + baseToken.symbol(),
     )
     cloned_strategy = Contract.from_abi(
@@ -120,7 +119,7 @@ def test_clone_of_weth(
     cloned_strategy.setStrategyParams(
         strategy.targetLTVMultiplier(),
         strategy.warningLTVMultiplier(),
-        strategy.maxTotalBorrowBT(),
+        strategy.minToSell(),
         strategy.leaveDebtBehind(),
         strategy.maxLoss(),
         strategy.maxGasPriceToTend(),
@@ -129,28 +128,28 @@ def test_clone_of_weth(
 
     # should fail due to already initialized
     with reverts():
-        cloned_strategy.initialize(weth_vault, comet, ethToWantFee, yVault, "NameRevert", {"from": gov})
+        cloned_strategy.initialize(weth_vault, comet, ethToWantFee, yvault, "NameRevert", {"from": gov})
 
     weth_vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
 
     weth.approve(weth_vault, 2 ** 256 - 1, {"from": weth_whale})
     weth_vault.deposit(10 * (10 ** weth.decimals()), {"from": weth_whale})
     strategy = cloned_strategy
-    print_debug(yVault, strategy, comet)
+    print_debug(yvault, strategy, comet)
     tx = strategy.harvest({"from": gov})
-    #assert yVault.balanceOf(strategy) > 0
-    print_debug(yVault, strategy, comet)
-    print_strat_status(strategy, weth_vault, yVault)
+    #assert yvault.balanceOf(strategy) > 0
+    print_debug(yvault, strategy, comet)
+    print_strat_status(strategy, weth_vault, yvault)
     # Sleep for 1 days
     chain.sleep(60 * 60 * 24)
     chain.mine(1)
 
     # Send some profit to yvETH
-    baseToken.transfer(yVault, 1_000 * (10 ** baseToken.decimals()), {"from": borrow_whale})
+    baseToken.transfer(yvault, 1_000 * (10 ** baseToken.decimals()), {"from": borrow_whale})
 
     # TODO: check profits before and after
     strategy.harvest({"from": gov})
-    print_debug(yVault, strategy, comet)
+    print_debug(yvault, strategy, comet)
 
     # We should have profit after getting some profit from yvETH
     assert weth_vault.strategies(strategy).dict()["totalGain"] > 0
@@ -159,25 +158,24 @@ def test_clone_of_weth(
     # Enough sleep for profit to be free
     chain.sleep(60 * 60 * 7)
     chain.mine(1)
-    print_debug(yVault, strategy, comet)
+    print_debug(yvault, strategy, comet)
 
     # why do we have losses? because of interests
     with reverts():
         weth_vault.withdraw()
 
     # so we send profits
-    #baseToken.transfer(yVault, Wei("30_000 ether"), {"from": borrow_whale})
+    #baseToken.transfer(yvault, Wei("30_000 ether"), {"from": borrow_whale})
     weth_vault.withdraw({"from": weth_whale})
 
-"""
 def print_debug(yv, strategy, com):
     yv_balance = yv.balanceOf(strategy)
     yv_pps = yv.pricePerShare()
     totalDebt = com.borrowBalanceOf(strategy)
     decimal = 10 ** yv.decimals()
-    print(f"Strategy yVault balance is: {yv_balance} with pps {yv_pps}")
+    print(f"Strategy yvault balance is: {yv_balance} with pps {yv_pps}")
     yv_value = (yv_balance * yv_pps) / decimal
-    print(f"yVault value {yv_value/decimal} vs {totalDebt/decimal}\n")
+    print(f"yvault value {yv_value/decimal} vs {totalDebt/decimal}\n")
 
 def print_strat_status(strat, v, yv):
     print(f"Infpr fpr {strat.name()}")

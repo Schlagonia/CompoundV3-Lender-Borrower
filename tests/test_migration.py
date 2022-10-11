@@ -1,7 +1,6 @@
 import pytest
 from brownie import chain, Wei, reverts
 
-
 def test_migration(
     vault,
     strategy,
@@ -12,18 +11,19 @@ def test_migration(
     borrow_token,
     borrow_whale,
     yvault,
-    token_incentivised,
-    borrow_incentivised,
     cloner,
     strategist,
+    amount,
+    comet,
+    ethToWantFee
 ):
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(500_000 * (10 ** token.decimals()), {"from": token_whale})
+    vault.deposit(amount, {"from": token_whale})
 
     chain.sleep(1)
     strategy.harvest({"from": gov})
     borrow_token.transfer(
-        yvault, 20000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
+        yvault, 2000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
     )
 
     chain.sleep(1)
@@ -33,23 +33,21 @@ def test_migration(
 
     # Deploy new Strategy and migrate
     strategy2 = Strategy.at(
-        cloner.cloneAaveLenderBorrower(
+        cloner.cloneCompV3LenderBorrower(
             vault,
             strategist,
             strategist,
             strategist,
+            comet,
+            ethToWantFee,
             yvault,
-            token_incentivised,
-            borrow_incentivised,
             "name",
         ).return_value
     )
 
     old_debt_ratio = vault.strategies(strategy).dict()["debtRatio"]
-    vault.revokeStrategy(strategy, {"from": gov})
 
     chain.sleep(1)
-    strategy.harvest({"from": gov})
     vault.migrateStrategy(strategy, strategy2, {"from": gov})
     vault.updateStrategyDebtRatio(strategy2, old_debt_ratio, {"from": gov})
     chain.sleep(1)
