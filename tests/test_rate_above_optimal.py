@@ -2,70 +2,37 @@ import pytest
 from brownie import chain, Wei, Contract, accounts, ZERO_ADDRESS
 
 
-def get_lp():
-    pd_provider = Contract("0x057835Ad21a177dbdd3090bB1CAE03EaCF78Fc6d")
-    a_provider = Contract(pd_provider.ADDRESSES_PROVIDER())
-    return Contract(a_provider.getLendingPool())
-
-
 def test_rate_above_optimal(
-    vault, strategy, gov, token, token_whale, vdToken, borrow_whale, borrow_token
+    vault, strategy, gov, token, token_whale, borrow_whale, borrow_token, amount, comet, bal_vault
 ):
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(500_000 * (10 ** token.decimals()), {"from": token_whale})
+    vault.deposit(amount, {"from": token_whale})
+    print(f"current Borrow rate: {strategy.getBorrowApr(0)/1e18}")
+    print(f"current reward rate: {strategy.getRewardAprForBorrowBase(0)/1e18}")
 
-    strategy.setStrategyParams(
-        strategy.targetLTVMultiplier(),
-        strategy.warningLTVMultiplier(),
-        1e26,
-        0,
-        strategy.minToSell(),
-        strategy.isWantIncentivised(),
-        strategy.isInvestmentTokenIncentivised(),
-        strategy.leaveDebtBehind(),
-        strategy.maxLoss(),
-        strategy.maxGasPriceToTend(),
-        {"from": strategy.strategist()},
-    )
-
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+    assert comet.borrowBalanceOf(strategy) > 0
     # This will increase the rate to > 100%
-    increase_interest(borrow_token, borrow_whale)
+    increase_interest(borrow_token, token, bal_vault, comet)
+    print(f"current Borrow rate: {strategy.getBorrowApr(0)/1e18}")
+    print(f"current reward rate: {strategy.getRewardAprForBorrowBase(0)/1e18}")
+
+    chain.sleep(1)    
+    assert strategy.tendTrigger(0) == True
+    strategy.tend({"from": gov})
+    assert comet.borrowBalanceOf(strategy) == 0
+    chain.sleep(1)    
+    print(f"current Borrow rate: {strategy.getBorrowApr(0)/1e18}")
+    print(f"current reward rate: {strategy.getRewardAprForBorrowBase(0)/1e18}")
 
     strategy.harvest({"from": gov})
-    assert vdToken.balanceOf(strategy) == 0
-
-    currentCost = (
-        get_lp()
-        .getReserveData(Contract(strategy.yVault()).token())
-        .dict()["currentVariableBorrowRate"]
-    )
-    print(f"current rate: {currentCost/1e27}")
-
-    strategy.setStrategyParams(
-        strategy.targetLTVMultiplier(),
-        strategy.warningLTVMultiplier(),
-        currentCost * 1.01,
-        0,
-        strategy.minToSell(),
-        strategy.isWantIncentivised(),
-        strategy.isInvestmentTokenIncentivised(),
-        strategy.leaveDebtBehind(),
-        strategy.maxLoss(),
-        strategy.maxGasPriceToTend(),
-        {"from": strategy.strategist()},
-    )
-
-    strategy.harvest({"from": gov})
-    assert vdToken.balanceOf(strategy) > 0
+    assert comet.borrowBalanceOf(strategy) == 0
 
 
-def increase_interest(bToken, whale):
-    lp = get_lp()
-    aBorrow = lp.getReserveData(bToken).dict()["aTokenAddress"]
-    liquidity = bToken.balanceOf(aBorrow)
-    to_move = liquidity * 0.9
-    bToken.transfer(whale, to_move, {"from": aBorrow})  # to bToken to burn it randomly
-
-    # Deposit 1 wei/unit to update the rates
-    bToken.approve(lp, 2 ** 256 - 1, {"from": whale})
-    lp.deposit(bToken, 1, whale, 0, {"from": whale})
+def increase_interest(bToken, t, whale, com):
+    toSupply = 2000
+    t.approve(com.address, 2 ** 256 - 1, {"from":whale})
+    com.supply(t, toSupply, {"from":whale})
+    com.withdraw(bToken, 30000000, {"from":whale})
+    

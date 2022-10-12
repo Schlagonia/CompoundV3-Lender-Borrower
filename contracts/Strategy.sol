@@ -441,15 +441,15 @@ contract Strategy is BaseStrategy {
         uint256 currentLTV = debtInUsd * 1e18 / collateralInUsd;
         uint256 targetLTV = _getTargetLTV(currentLiquidationThreshold);
         uint256 warningLTV = _getWarningLTV(currentLiquidationThreshold);
-
+        
         if (currentLTV > warningLTV) {
             return IBaseFeeGlobal(0xf8d0Ec04e94296773cE20eFbeeA82e76220cD549)
                         .basefee_global() <= maxGasPriceToTend;
         }
-
+        
         if (
-            (currentLTV < targetLTV && targetLTV - currentLTV > 1000) || // WE NEED TO TAKE ON MORE DEBT (we need a 10p.p (1000bps) difference)
-                (getBorrowApr(0) < getRewardAprForBorrowBase(0)) // UNHEALTHY BORROWING COSTS
+            (currentLTV < targetLTV && targetLTV - currentLTV > 1e17) || // WE NEED TO TAKE ON MORE DEBT (we need a 10p.p (1000bps) difference)
+                (getBorrowApr(0) > getRewardAprForBorrowBase(0)) // UNHEALTHY BORROWING COSTS
         ) {
             return isBaseFeeAcceptable();
         }

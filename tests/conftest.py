@@ -51,6 +51,10 @@ def amount(accounts, token, token_whale):
     token.transfer(token_whale, amount, {"from": reserve})
     yield amount
 
+@pytest.fixture
+def bal_vault(accounts):
+    yield accounts.at("0xba12222222228d8ba445958a75a0704d566bf2c8", force=True)
+
 
 @pytest.fixture
 def weth():
