@@ -69,9 +69,7 @@ contract Strategy is BaseStrategy {
     ISwapRouter internal constant router =
         ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
     //Fees for the V3 pools
-    uint24 public compToEthFee;
-    uint24 public ethToBaseFee;
-    uint24 public ethToWantFee;
+    mapping (address => mapping (address => uint24)) public uniFees;
 
     //Needs to be set to at least comet.baseBorrowMin()
     uint256 internal minThreshold;
@@ -125,9 +123,14 @@ contract Strategy is BaseStrategy {
         uint24 _ethToBaseFee,
         uint24 _ethToWantFee
     ) external onlyAuthorized {
-        compToEthFee = _compToEthFee;
-        ethToBaseFee = _ethToBaseFee;
-        ethToWantFee = _ethToWantFee;
+        uniFees[address(want)][weth] = _ethToWantFee;
+        uniFees[weth][address(want)] = _ethToWantFee;
+        //Default to .3% pool
+        uniFees[comp][weth] = _compToEthFee;
+        uniFees[weth][comp] = _compToEthFee;
+        //Default to .05% pool
+        uniFees[baseToken][weth] = _ethToBaseFee;
+        uniFees[weth][baseToken] = _ethToBaseFee;
     }
 
     function _initializeThis(
@@ -154,11 +157,14 @@ contract Strategy is BaseStrategy {
         IERC20(baseToken).safeApprove(_yVault, type(uint256).max);
         IERC20(comp).safeApprove(address(router), type(uint256).max);
 
+        uniFees[address(want)][weth] = _ethToWantFee;
+        uniFees[weth][address(want)] = _ethToWantFee;
         //Default to .3% pool
-        compToEthFee = 3000;
+        uniFees[comp][weth] = 3000;
+        uniFees[weth][comp] = 3000;
         //Default to .05% pool
-        ethToBaseFee = 500;
-        ethToWantFee = _ethToWantFee;
+        uniFees[baseToken][weth] = 500;
+        uniFees[weth][baseToken] = 500;
 
         strategyName = _strategyName;
 
@@ -400,7 +406,7 @@ contract Strategy is BaseStrategy {
 
     function prepareMigration(address _newStrategy) internal override {
         //Withraw from vault first to know exactly how much we need to pay back
-        _withdrawFromYVault(yVault.balanceOf(address(this)));
+        yVault.withdraw(yVault.balanceOf(address(this)), address(this), maxLoss);
         //Claim and sell all rewards to cover debt
         _claimAndSellRewards();
         //Pay back debt and withdrawal all collateral
@@ -689,87 +695,7 @@ contract Strategy is BaseStrategy {
             liquidationThreshold * uint256(warningLTVMultiplier) / MAX_BPS;
     }
 
-    // ----------------- TOKEN CONVERSIONS -----------------
-
-    function _claimAndSellRewards() internal {
-        _claimRewards();
-
-        uint256 compBalance = IERC20(comp).balanceOf(address(this));
-
-        if(compBalance <= minToSell) return;
-
-        uint256 baseNeeded = baseTokenOwedBalance();
-
-        if(baseNeeded > 0) {
-
-            bytes memory path =
-                abi.encodePacked(
-                    baseToken, 
-                    ethToBaseFee,// base-ETH
-                    weth, 
-                    compToEthFee, // ETH-want
-                    comp
-                    );
-
-            // Proceeds from Comp are not subject to minExpectedSwapPercentage
-            // so they could get sandwiched if we end up in an uncle block
-            router.exactOutput(
-                ISwapRouter.ExactOutputParams(
-                    path,
-                    address(this),
-                    block.timestamp,
-                    baseNeeded, //How much we want out
-                    compBalance
-                )
-            );
-        }
-
-        compBalance = IERC20(comp).balanceOf(address(this));
-
-        if(compBalance > minToSell) {
-            _sellCompToWant(compBalance);
-        }
-    }
-
-    function _sellCompToWant(uint256 _amount) internal {
-        if(address(want) == weth) {
-            ISwapRouter.ExactInputSingleParams memory params =
-                ISwapRouter.ExactInputSingleParams(
-                    comp, // tokenIn
-                    address(want), // tokenOut
-                    compToEthFee, // comp-eth fee
-                    address(this), // recipient
-                    block.timestamp, // deadline
-                    _amount, // amountIn
-                    0, // amountOut
-                    0 // sqrtPriceLimitX96
-                );
-
-            router.exactInputSingle(params);
-            
-        } else {
-            bytes memory path =
-                abi.encodePacked(
-                    comp, // comp-ETH
-                    compToEthFee,
-                    weth, // ETH-want
-                    ethToWantFee,
-                    address(want)
-                );
-
-            // Proceeds from Comp are not subject to minExpectedSwapPercentage
-            // so they could get sandwiched if we end up in an uncle block
-            router.exactInput(
-                ISwapRouter.ExactInputParams(
-                    path,
-                    address(this),
-                    block.timestamp,
-                    _amount,
-                    0
-                )
-            );
-        }
-    }
+    // ----------------- HARVEST / TOKEN CONVERSIONS -----------------
 
     /*
     * Gets the amount of reward tokens due to this contract address
@@ -795,60 +721,126 @@ contract Strategy is BaseStrategy {
         rewardsContract.claim(address(comet), address(this), true);
     }
 
-    function _buyBaseTokenWithWant(uint256 _amount) internal {
-        if (_amount == 0) {
-            return;
+    function _claimAndSellRewards() internal {
+        _claimRewards();
+
+        uint256 compBalance = IERC20(comp).balanceOf(address(this));
+
+        if(compBalance <= minToSell) return;
+
+        uint256 baseNeeded = baseTokenOwedBalance();
+
+        if(baseNeeded > 0) {
+            //We estimate how much we will need in order to get the amount of base
+            uint256 maxComp = _fromUsd(_toUsd(baseNeeded, baseToken), comp) * 10_500 / MAX_BPS;
+            if(maxComp < compBalance) {
+                //IF we have enough swap and exact amount out
+                _swapFrom(comp, baseToken, baseNeeded, maxComp);
+            } else {
+                //if not swap everything we have
+                _swapTo(comp, baseToken, compBalance);
+            }
         }
-        uint256 maxWantBalance = _fromUsd(_toUsd(_amount, baseToken), address(want)) * 9800 / MAX_BPS;
-        _checkAllowance(address(router), address(want), maxWantBalance);
-        if(address(want) == weth || baseToken == weth) {
-            ISwapRouter.ExactOutputSingleParams memory params =
-                ISwapRouter.ExactOutputSingleParams(
-                    address(want), // tokenIn
-                    baseToken, // tokenOut
-                    ethToWantFee, // want-eth fee
+
+        compBalance = IERC20(comp).balanceOf(address(this));
+
+        if(compBalance > minToSell) {
+            _swapTo(comp, address(want), compBalance);
+        }
+    }
+
+    function _buyBaseTokenWithWant(uint256 _amount) internal {
+        //Need to account for both slippage and diff in the oracle price.
+        //Should be only swapping very small amounts so its just to make sure there is no massive sandwhich
+        uint256 maxWantBalance = _fromUsd(_toUsd(_amount, baseToken), address(want)) * 11_000 / MAX_BPS;
+        if (maxWantBalance == 0) return;
+
+        //This should rarely if ever happen so we approve only what is needed
+        IERC20(address(want)).safeApprove(address(router), 0);
+        IERC20(address(want)).safeApprove(address(router), maxWantBalance);
+        _swapFrom(address(want), baseToken, _amount, maxWantBalance);   
+    }
+
+    function _swapTo(address _from, address _to, uint256 _amountFrom) internal {
+        if(_from == weth || _to == weth) {
+            ISwapRouter.ExactInputSingleParams memory params =
+                ISwapRouter.ExactInputSingleParams(
+                    _from, // tokenIn
+                    _to, // tokenOut
+                    uniFees[_from][_to], // comp-eth fee
                     address(this), // recipient
                     block.timestamp, // deadline
-                    _amount, // amountOut
-                    maxWantBalance, // amountIn
+                    _amountFrom, // amountIn
+                    0, // amountOut
+                    0 // sqrtPriceLimitX96
+                );
+
+            router.exactInputSingle(params);
+        } else {
+            bytes memory path =
+                abi.encodePacked(
+                    _from, // comp-ETH
+                    uniFees[_from][weth],
+                    weth, // ETH-want
+                    uniFees[weth][_to],
+                    _to
+                );
+
+            // Proceeds from Comp are not subject to minExpectedSwapPercentage
+            // so they could get sandwiched if we end up in an uncle block
+            router.exactInput(
+                ISwapRouter.ExactInputParams(
+                    path,
+                    address(this),
+                    block.timestamp,
+                    _amountFrom,
+                    0
+                )
+            );
+        }
+    }
+
+    function _swapFrom(
+        address _from, 
+        address _to, 
+        uint256 _amountTo, 
+        uint256 _maxAmountFrom
+    ) internal {
+        if(_from == weth || _to == weth) {
+            ISwapRouter.ExactOutputSingleParams memory params =
+                ISwapRouter.ExactOutputSingleParams(
+                    _from, // tokenIn
+                    _to, // tokenOut
+                    uniFees[_from][_to], // want-eth fee
+                    address(this), // recipient
+                    block.timestamp, // deadline
+                    _amountTo, // amountOut
+                    _maxAmountFrom, // amountIn
                     0 // sqrtPriceLimitX96
                 );
 
             router.exactOutputSingle(params);
-            
         } else {
             bytes memory path =
                 abi.encodePacked(
-                    baseToken, //Token out
-                    ethToBaseFee,
-                    weth, // middle token
-                    ethToWantFee,
-                    address(want) // token in
-                );
+                    _to, 
+                    uniFees[weth][_to],// to-ETH
+                    weth, 
+                    uniFees[_from][weth], // ETH-from
+                    _from
+                    );
 
             router.exactOutput(
                 ISwapRouter.ExactOutputParams(
                     path,
                     address(this),
                     block.timestamp,
-                    _amount,
-                    maxWantBalance
+                    _amountTo, //How much we want out
+                    _maxAmountFrom
                 )
             );
         }
     }
-
-    function _checkAllowance(
-        address _contract,
-        address _token,
-        uint256 _amount
-    ) internal {
-        if (IERC20(_token).allowance(address(this), _contract) < _amount) {
-            IERC20(_token).safeApprove(_contract, 0);
-            IERC20(_token).safeApprove(_contract, type(uint256).max);
-        }
-    }
-
 
     function ethToWant(uint256 _amtInWei)
         public
