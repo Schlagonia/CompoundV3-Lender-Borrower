@@ -1,5 +1,5 @@
 from brownie import chain
-
+import pytest
 
 def test_direct_transfer_increments_estimated_total_assets(
     strategy, token, token_whale,
@@ -10,7 +10,7 @@ def test_direct_transfer_increments_estimated_total_assets(
     assert strategy.estimatedTotalAssets() == initial + amount
 
 
-def test_direct_transfer_increments_profits(vault, strategy, token, token_whale, gov, amount):
+def test_direct_transfer_increments_profits(vault, strategy, token, token_whale, gov, amount, RELATIVE_APPROX):
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(amount, {"from": token_whale})
 
@@ -22,9 +22,11 @@ def test_direct_transfer_increments_profits(vault, strategy, token, token_whale,
 
     amount = 1 * (10 ** token.decimals())
     token.transfer(strategy, amount, {"from": token_whale})
-    chain.sleep(1)
+    chain.sleep(10)
+    strategy.setDoHealthCheck(False, {"from": gov})
     strategy.harvest({"from": gov})
-    assert vault.strategies(strategy).dict()["totalGain"] >= initialProfit + amount
+    #assert vault.strategies(strategy).dict()["totalGain"] >= initialProfit + amount
+    assert pytest.approx(vault.strategies(strategy).dict()["totalGain"], rel=RELATIVE_APPROX) == amount
 
 
 def test_borrow_token_transfer_sends_to_yvault(
@@ -61,7 +63,7 @@ def test_borrow_token_transfer_increments_yshares(
 
 
 def test_borrow_token_transfer_increments_profits(
-    vault, strategy, token, token_whale, borrow_token, borrow_whale, gov, AaveLibrary, amount
+    vault, strategy, token, token_whale, borrow_token, borrow_whale, gov, amount
 ):
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(amount, {"from": token_whale})
@@ -120,7 +122,7 @@ def test_direct_transfer_with_actual_profits(
     # sleep for another day
     chain.sleep(24 * 3600)
     chain.mine(1)
-
+    strategy.setDoHealthCheck(False, {"from": gov})
     strategy.harvest({"from": gov})
     assert (
         vault.strategies(strategy).dict()["totalGain"] > initialProfit + airdropAmount

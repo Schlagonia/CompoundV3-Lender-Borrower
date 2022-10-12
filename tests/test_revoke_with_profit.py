@@ -22,9 +22,7 @@ def test_revoke_with_profit(
     strategy.harvest({"from": gov})
 
     # Send some profit to yvault
-    borrow_token.transfer(
-        yvault, 20_000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
-    )
+    chain.sleep(60 * 60 *12)
     vault.revokeStrategy(strategy, {"from": gov})
     strategy.harvest({"from": gov})
 

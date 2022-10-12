@@ -44,7 +44,7 @@ def keeper(accounts):
 
 @pytest.fixture
 def amount(accounts, token, token_whale):
-    amount = 5 * 10 ** token.decimals()
+    amount = 5 * (10 ** token.decimals())
     # In order to get some funds for the token you are about to use,
     # it impersonate an exchange address to use it's funds.
     reserve = accounts.at("0xba12222222228d8ba445958a75a0704d566bf2c8", force=True)

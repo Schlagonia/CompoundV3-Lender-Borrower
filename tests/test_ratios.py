@@ -10,30 +10,25 @@ def test_lev_ratios(
     borrow_token,
     borrow_whale,
     yvault,
-    vdToken,
-    aToken,
+    comet,
+    amount
 ):
-    lp = get_lending_pool()
 
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(500_000 * (10 ** token.decimals()), {"from": token_whale})
+    vault.deposit(amount, {"from": token_whale})
 
     chain.sleep(1)
     strategy.harvest({"from": gov})
 
     targetLTV = strategy.targetLTVMultiplier()
 
-    print_status(lp, strategy)
+    print_status(strategy, vault, yvault)
     # should revert with ratios > 90%
     with reverts():
         strategy.setStrategyParams(
             9_001,
             9_001,
-            strategy.acceptableCostsRay(),
-            0,
             strategy.minToSell(),
-            strategy.isWantIncentivised(),
-            strategy.isInvestmentTokenIncentivised(),
             strategy.leaveDebtBehind(),
             strategy.maxLoss(),
             strategy.maxGasPriceToTend(),
@@ -44,11 +39,7 @@ def test_lev_ratios(
         strategy.setStrategyParams(
             8_000,
             7_000,
-            strategy.acceptableCostsRay(),
-            0,
             strategy.minToSell(),
-            strategy.isWantIncentivised(),
-            strategy.isInvestmentTokenIncentivised(),
             strategy.leaveDebtBehind(),
             strategy.maxLoss(),
             strategy.maxGasPriceToTend(),
@@ -59,77 +50,66 @@ def test_lev_ratios(
     strategy.setStrategyParams(
         targetLTV / 2,
         targetLTV / 1.01,
-        strategy.acceptableCostsRay(),
-        0,
         strategy.minToSell(),
-        strategy.isWantIncentivised(),
-        strategy.isInvestmentTokenIncentivised(),
         strategy.leaveDebtBehind(),
         strategy.maxLoss(),
         strategy.maxGasPriceToTend(),
         {"from": strategy.strategist()},
     )
     # to offset interest rates and be able to repay full debt (assuming we were able to generate profit before lowering acceptableCosts)
-    borrow_token.transfer(
-        yvault, 10_000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
-    )
-    previousDebt = vdToken.balanceOf(strategy)
+    #borrow_token.transfer(
+    #    yvault, 10_000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
+    #)
+    previousDebt = comet.borrowBalanceOf(strategy)
     tx = strategy.harvest({"from": gov})
-    assert previousDebt > vdToken.balanceOf(strategy)
-    print_status(lp, strategy)
+    assert previousDebt > comet.borrowBalanceOf(strategy)
+    print_status(strategy, vault, yvault)
 
-    print_status(lp, strategy)
+    print_status(strategy, vault, yvault)
     # we reduce the target to half and set target ratio = 0
     strategy.setStrategyParams(
         0,
         targetLTV / 3,  # trigger to set to rebalance
-        strategy.acceptableCostsRay(),
-        0,
         strategy.minToSell(),
-        strategy.isWantIncentivised(),
-        strategy.isInvestmentTokenIncentivised(),
         strategy.leaveDebtBehind(),
         strategy.maxLoss(),
         strategy.maxGasPriceToTend(),
         {"from": strategy.strategist()},
     )
     # to offset interest rates and be able to repay full debt (assuming we were able to generate profit before lowering acceptableCosts)
-    borrow_token.transfer(
-        yvault, 10000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
-    )
-    previousDebt = vdToken.balanceOf(strategy)
+    #borrow_token.transfer(
+    #    yvault, 10000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
+    #)
+    previousDebt = comet.borrowBalanceOf(strategy)
     strategy.harvest({"from": gov})
-    print_status(lp, strategy)
+    print_status(strategy, vault, yvault)
 
-    assert vdToken.balanceOf(strategy) == 0
+    assert comet.borrowBalanceOf(strategy) == 0
     assert token.balanceOf(strategy) == 0
-    assert aToken.balanceOf(strategy) > 0  # want is deposited as collateral
+    assert strategy.balanceOfCollateral() > 0  # want is deposited as collateral
     # rounding
     # assert (
     #     strategy.estimatedTotalAssets()-aToken.balanceOf(strategy) < 3
     # )  # no debt, no investments
     print(f"TotalAssets:{strategy.estimatedTotalAssets()}")
-    print(f"AToken: {aToken.balanceOf(strategy)}")
-    borrow_token.transfer(
-        yvault, 1000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
-    )
+    print(f"Collateral: {strategy.balanceOfCollateral()}")
+    print(f"Value of users holding {vault.balanceOf(token_whale) * vault.pricePerShare() / (10**vault.decimals())}")
+    #borrow_token.transfer(
+    #    yvault, 1000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
+    #)
 
     vault.withdraw({"from": token_whale})
 
-
-def get_lending_pool():
-    pd_provider = Contract("0x057835Ad21a177dbdd3090bB1CAE03EaCF78Fc6d")
-    a_provider = Contract(pd_provider.ADDRESSES_PROVIDER())
-    lp = Contract(a_provider.getLendingPool())
-    return lp
-
-
-def print_status(lp, strategy):
-    userDict = lp.getUserAccountData(strategy).dict()
-    currentDebtETH = userDict["totalDebtETH"]
-    currentCollateralETH = userDict["totalCollateralETH"]
-    currentLTV = currentDebtETH * 10_000 / currentCollateralETH
-    print("Current Debt ETH", currentDebtETH / 1e18)
-    print("Current Collateral ETH", currentCollateralETH / 1e18)
-    print("CurrentLTV", currentLTV / 100, "%")
-    print()
+def print_status(strat, v, yv):
+    print(f"Infpr fpr {strat.name()}")
+    decimals = 10 ** v.decimals()
+    print(f"Estimated strat assets : {strat.estimatedTotalAssets()/decimals}")
+    print(f"made up of {strat.balanceOfWant()/decimals} loose want")
+    print(f"made up of {strat.balanceOfCollateral()/decimals} of Collateral")
+    print(f"{strat.getRewardsOwed()} in owed reward")
+    print(f"made up of {strat.rewardsInWant()/decimals} rewards in want")
+    print(f"made up of {strat.balanceOfDebt()/(10**yv.decimals())} of debt owed")
+    print(f"made up of {strat.balanceOfVault()/(10**yv.decimals())} of yvault assets")
+    print(f"For a total base token owed bal of {strat.baseTokenOwedBalance()/(10**yv.decimals())}")
+    print(f"Current borrow apr: {strat.getBorrowApr(0)/1e18}")
+    print(f"current rewards apr is : {strat.getRewardAprForBorrowBase(0)/1e18}")

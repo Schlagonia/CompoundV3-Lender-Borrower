@@ -60,6 +60,7 @@ library CometStructs {
 interface Comet is IERC20 {
   function baseScale() external view returns (uint);
   function supply(address asset, uint amount) external;
+  function supplyTo(address to, address asset, uint amount) external;
   function withdraw(address asset, uint amount) external;
 
   function getSupplyRate(uint utilization) external view returns (uint);

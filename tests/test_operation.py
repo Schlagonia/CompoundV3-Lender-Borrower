@@ -1,7 +1,7 @@
 from brownie import chain, reverts, Contract
 import pytest
 
-"""
+
 def test_operation(token, vault, token_whale, strategy, strategist, amount, RELATIVE_APPROX):
     user_balance_before = token.balanceOf(token_whale)
 
@@ -108,8 +108,9 @@ def test_change_debt(
 
     # In order to pass this tests, you will need to implement prepareReturn.
     # TODO: uncomment the following lines.
+    chain.sleep(1)
     vault.updateStrategyDebtRatio(strategy.address, 5_000, {"from": gov})
-    strategy.harvest()
+    strategy.harvest({"from":gov})
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == half
 
 
@@ -163,22 +164,28 @@ def test_triggers(gov, vault, strategy, token_whale, token, amount, accounts, co
     assert strategy.tendTrigger(1010) == False
 
     strategy.setProfitFactor(1000000000000000, {"from":gov})
-
+    
     #pull funds out to get above warnfing value
     borrowed = comet.borrowBalanceOf(strategy.address)
+    print(f"Borrowed {borrowed}")
     toBorrow = borrowed / 4
+    print(f"To Borrow {toBorrow}")
+    baseFeeGlobal = Contract("0xf8d0Ec04e94296773cE20eFbeeA82e76220cD549")
+    print(f"BaseFee global base fee: {baseFeeGlobal.basefee_global()}")
     acct = accounts.at(strategy.address, force=True)
-    comet.withdraw(token.address, toBorrow, {"from":acct})
+    comet.withdraw(token.address, 100000000, {"from":acct})
+    chain.sleep(1)
     assert strategy.tendTrigger(100) == True
 
     strategy.tend({"from":gov})
     assert strategy.tendTrigger(100) == False
-
+    
     #change the ltv
-    comet.supply(token_whale, strategy.address, token, amount, {"from":strategy})
+    token.approve(comet.address, 2**256 -1, {"from":token_whale})
+    comet.supplyTo(strategy.address, token, amount, {"from":token_whale})
     assert strategy.tendTrigger(100) == True
 
     strategy.tend({"from":gov})
     assert strategy.tendTrigger(100) == False
-
+"""
     
