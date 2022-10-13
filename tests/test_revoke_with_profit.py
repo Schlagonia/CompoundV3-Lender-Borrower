@@ -9,14 +9,14 @@ def test_revoke_with_profit(
     token_whale,
     gov,
     RELATIVE_APPROX,
-    vdToken,
-    aToken,
     borrow_token,
     borrow_whale,
     yvault,
+    comet,
+    amount
 ):
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(500_000 * (10 ** token.decimals()), {"from": token_whale})
+    vault.deposit(amount, {"from": token_whale})
 
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -25,8 +25,5 @@ def test_revoke_with_profit(
     chain.sleep(60 * 60 *12)
     vault.revokeStrategy(strategy, {"from": gov})
     strategy.harvest({"from": gov})
-
-    assert pytest.approx(vdToken.balanceOf(strategy) / 1e18, RELATIVE_APPROX) == 0
-    assert pytest.approx(aToken.balanceOf(strategy) / 1e18, RELATIVE_APPROX) == 0
     assert vault.strategies(strategy).dict()["totalGain"] > 0
     assert vault.strategies(strategy).dict()["totalDebt"] <= 1

@@ -69,8 +69,7 @@ jobs:
         brownie test ./tests/test_max_loss.py -s
         brownie test ./tests/test_migration.py -s
         brownie test ./tests/test_operation.py -s
-        brownie test ./tests/test_rate_above_optimal.py -s
+        brownie test ./tests/test_live_vault.py -s
         brownie test ./tests/test_ratios.py -s
         brownie test ./tests/test_revoke_with_profit.py -s
         brownie test ./tests/test_revoke.py -s
-        brownie test ./tests/test_rewards.py -s

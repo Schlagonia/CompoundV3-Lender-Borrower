@@ -13,8 +13,9 @@ def test_revoke_strategy_from_vault(
     yvault,
     borrow_token,
     borrow_whale,
+    amount
 ):
-    amount = 50_000 * (10 ** token.decimals())
+
     # Deposit to the vault and harvest
     token.approve(vault.address, amount, {"from": token_whale})
     vault.deposit(amount, {"from": token_whale})
@@ -26,30 +27,19 @@ def test_revoke_strategy_from_vault(
     vault.revokeStrategy(strategy.address, {"from": gov})
 
     # Send some profit to yvault to compensate losses, so the strat is able to repay full amount
-    chain.sleep(60*60*24)
+    #chain.sleep(60*60)
 
     chain.sleep(1)
     strategy.harvest({"from": gov})
-    assert (
-        pytest.approx(
-            comet.borrowBalanceOf(strategy) / (10 ** yvault.decimals()),
-            rel=RELATIVE_APPROX,
-        )
-        == 0
-    )
-    assert (
-        pytest.approx(
-            strategy.balanceOfCollateral(strategy) / (10 ** vault.decimals()), rel=RELATIVE_APPROX
-        )
-        == 0
-    )
+
     assert token.balanceOf(vault.address) >= amount
 
 
+
 def test_revoke_strategy_from_strategy(
-    token, vault, strategy, gov, token_whale, RELATIVE_APPROX
+    token, vault, strategy, gov, token_whale, RELATIVE_APPROX, amount
 ):
-    amount = 50_000 * (10 ** token.decimals())
+
     # Deposit to the vault and harvest
     token.approve(vault.address, amount, {"from": token_whale})
     vault.deposit(amount, {"from": token_whale})

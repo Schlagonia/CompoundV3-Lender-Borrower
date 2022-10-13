@@ -68,7 +68,7 @@ def test_lev_ratios(
     print_status(strategy, vault, yvault)
     # we reduce the target to half and set target ratio = 0
     strategy.setStrategyParams(
-        0,
+        0, #need to set to 1 so we dont divider by 0
         targetLTV / 3,  # trigger to set to rebalance
         strategy.minToSell(),
         strategy.leaveDebtBehind(),
@@ -99,6 +99,7 @@ def test_lev_ratios(
     #)
 
     vault.withdraw({"from": token_whale})
+    
 
 def print_status(strat, v, yv):
     print(f"Infpr fpr {strat.name()}")

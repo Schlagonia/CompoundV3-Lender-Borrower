@@ -172,7 +172,7 @@ def registry():
 
 @pytest.fixture
 def live_vault(registry, token):
-    yield registry.latestVault(token)
+    yield Contract(registry.latestVault(token))
 
 
 @pytest.fixture
