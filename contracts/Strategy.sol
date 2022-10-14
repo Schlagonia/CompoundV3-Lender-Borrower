@@ -23,6 +23,14 @@ interface IBaseFee {
 interface IBaseFeeGlobal {
     function basefee_global() external view returns (uint256);
 }
+ 
+/********************
+ *   Strategy to farm the rewards on Compound V3 by providing any of the possible collateral assets and then borrowing the base token
+ *      The base token is then deposited into the corresponding Yearn vault and borrowing rewards are harvested.
+ *   Made by @Schlagonia
+ *   https://github.com/Schlagonia/CompoundV3-Lender-Borrower
+ *
+ ********************* */
 
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
