@@ -40,8 +40,8 @@ contract Strategy is BaseStrategy {
     uint internal constant DAYS_PER_YEAR = 365;
     uint internal constant SECONDS_PER_DAY = 60 * 60 * 24;
     uint internal constant SECONDS_PER_YEAR = 365 days;
-    uint public BASE_MANTISSA;
-    uint public BASE_INDEX_SCALE;
+    uint internal BASE_MANTISSA;
+    uint internal BASE_INDEX_SCALE;
 
     // if set to true, the strategy will not try to repay debt by selling want
     bool public leaveDebtBehind;
@@ -656,7 +656,7 @@ contract Strategy is BaseStrategy {
     /*
     * Get the price feed address for an asset
     */
-    function getPriceFeedAddress(address asset) public view returns (address) {
+    function getPriceFeedAddress(address asset) internal view returns (address) {
         if(asset == baseToken) return comet.baseTokenPriceFeed();
         return comet.getAssetInfoByAddress(asset).priceFeed;
     }
@@ -664,13 +664,21 @@ contract Strategy is BaseStrategy {
     /*
     * Get the current price of an asset from the protocol's persepctive
     */
-    function getCompoundPrice(address singleAssetPriceFeed) public view returns (uint) {
+    function getCompoundPrice(address singleAssetPriceFeed) internal view returns (uint) {
         return comet.getPrice(singleAssetPriceFeed);
     }
 
     function delegatedAssets() external view override returns (uint256) {
         // returns total debt borrowed in want (which is the delegatedAssets)
         return _fromUsd(_toUsd(balanceOfVault(), baseToken), address(want));
+    }
+
+    //External function used to easisly calculate the current LTV of the strat
+    function getCurrentLTV() external view returns(uint256) {
+        uint256 collat = balanceOfCollateral();
+        if(collat == 0) return 0;
+
+        return _toUsd(balanceOfDebt(), baseToken) * 1e18 / _toUsd(collat, address(want));
     }
 
     function _getTargetLTV(uint256 liquidationThreshold)

@@ -131,12 +131,12 @@ def test_clone_of_weth(
         cloned_strategy.initialize(weth_vault, comet, ethToWantFee, yvault, "NameRevert", {"from": gov})
 
     weth_vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
-
+    chain.sleep(1)
     weth.approve(weth_vault, 2 ** 256 - 1, {"from": weth_whale})
     weth_vault.deposit(10 * (10 ** weth.decimals()), {"from": weth_whale})
     strategy = cloned_strategy
     print_debug(yvault, strategy, comet)
-    tx = strategy.harvest({"from": gov})
+    strategy.harvest({"from": gov})
     #assert yvault.balanceOf(strategy) > 0
     print_debug(yvault, strategy, comet)
     print_strat_status(strategy, weth_vault, yvault)
