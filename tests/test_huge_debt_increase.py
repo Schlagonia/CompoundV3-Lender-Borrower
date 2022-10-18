@@ -20,13 +20,13 @@ def test_huge_debt(vault, strategy, gov, token, token_whale, amount, comet):
     print(f"T=365 totalDebt: {new_debt}")
     assert new_debt > prev_debt
 
-    # Test that there is no loss until withdrawal
+    # Test that there is no loss
     strategy.harvest({"from": gov})
     assert vault.strategies(strategy).dict()["totalLoss"] == 0
 
-    vault.withdraw(
-        vault.balanceOf(token_whale), token_whale, 10_000, {"from": token_whale}
-    )
+    #let profit unlock
+    chain.sleep(60 *60 *6)
+    vault.withdraw( {"from": token_whale})
 
     # we are currently in a profitable scenario so there is no loss
     print(f"diff {prev_balance-token.balanceOf(token_whale)}")
