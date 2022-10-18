@@ -204,7 +204,7 @@ contract Strategy is BaseStrategy {
     function estimatedTotalAssets() public view override returns (uint256) {
         //Returns the amount of want and collateral supplied plus an estimation of the rewards we are owed
         // minus the difference in amount supplied and amount borrowed of the base token
-        //This needs to account for rewards in order to not show a loss, but should not be relied upon
+        //This needs to account for rewards in order to not show a loss for harvestTrigger, but should not be relied upon.
         return
             balanceOfWant() + // balance of want
                 balanceOfCollateral() + // asset suplied as collateral
@@ -496,7 +496,7 @@ contract Strategy is BaseStrategy {
     * Supply an asset that this contract holds to Compound III
     * This is used both to supply collateral as well as the baseToken
     */
-    function _supply(address asset, uint amount) internal {
+    function _supply(address asset, uint256 amount) internal {
         if (amount == 0) return;
         comet.supply(asset, amount);
     }
@@ -505,7 +505,7 @@ contract Strategy is BaseStrategy {
     * Withdraws an asset from Compound III to this contract
     * for both collateral and borrowing baseToken
     */
-    function _withdraw(address asset, uint amount) internal {
+    function _withdraw(address asset, uint256 amount) internal {
         if (amount == 0) return;
         comet.withdraw(asset, amount);
     }
@@ -619,7 +619,7 @@ contract Strategy is BaseStrategy {
     /*
     * Get the current borrow APR in Compound III
     */
-    function getBorrowApr(uint256 newAmount) public view returns (uint) {
+    function getBorrowApr(uint256 newAmount) public view returns (uint256) {
 
         return comet.getBorrowRate(
                     (comet.totalBorrow() + newAmount) * 1e18 / comet.totalSupply() //New utilization
@@ -631,9 +631,9 @@ contract Strategy is BaseStrategy {
     * @param rewardTokenPriceFeed The address of the reward token (e.g. COMP) price feed
     * @return The reward APR in USD as a decimal scaled up by 1e18
     */
-    function getRewardAprForBorrowBase(uint newAmount) public view returns (uint) {
+    function getRewardAprForBorrowBase(uint256 newAmount) public view returns (uint256) {
         // borrowBaseRewardApr = (rewardTokenPriceInUsd * rewardToSuppliersPerDay / (usdcTotalBorrow * usdcPriceInUsd)) * DAYS_PER_YEAR;
-        uint rewardToBorrowersPerDay =  comet.baseTrackingBorrowSpeed() * SECONDS_PER_DAY * (BASE_INDEX_SCALE / BASE_MANTISSA);
+        uint256 rewardToBorrowersPerDay =  comet.baseTrackingBorrowSpeed() * SECONDS_PER_DAY * (BASE_INDEX_SCALE / BASE_MANTISSA);
         return (getCompoundPrice(getPriceFeedAddress(comp)) * 
                     rewardToBorrowersPerDay / 
                         ((comet.totalBorrow() + newAmount) * 
@@ -664,7 +664,7 @@ contract Strategy is BaseStrategy {
     /*
     * Get the current price of an asset from the protocol's persepctive
     */
-    function getCompoundPrice(address singleAssetPriceFeed) internal view returns (uint) {
+    function getCompoundPrice(address singleAssetPriceFeed) internal view returns (uint256) {
         return comet.getPrice(singleAssetPriceFeed);
     }
 
@@ -704,7 +704,7 @@ contract Strategy is BaseStrategy {
     /*
     * Gets the amount of reward tokens due to this contract address
     */
-    function getRewardsOwed() public view returns (uint) {
+    function getRewardsOwed() public view returns (uint256) {
         CometStructs.RewardConfig memory config = rewardsContract.rewardConfig(address(comet));
         uint256 accrued = comet.baseTrackingAccrued(address(this));
         if (config.shouldUpscale) {

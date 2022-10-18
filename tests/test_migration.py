@@ -20,13 +20,8 @@ def test_migration(
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(amount, {"from": token_whale})
 
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    borrow_token.transfer(
-        yvault, 2000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
-    )
+    chain.sleep(60 * 60 * 12)
 
-    chain.sleep(1)
     strategy.harvest({"from": gov})
     chain.sleep(60 * 60 * 24 * 2)
     chain.mine(1)

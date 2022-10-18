@@ -15,10 +15,9 @@ def test_operation(token, vault, token_whale, strategy, strategist, amount, RELA
     chain.sleep(1)
     strategy.harvest({"from": strategist})
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
-
+    chain.sleep(60 * 60)
     # withdrawal
-    #vault.withdraw(vault.balanceOf(token_whale), token_whale, 10_000, {"from": token_whale})
-    vault.withdraw(vault.balanceOf(token_whale), token_whale, 10_000, {"from": token_whale})
+    vault.withdraw({"from": token_whale})
     assert (
         pytest.approx(token.balanceOf(token_whale), rel=RELATIVE_APPROX)
         == user_balance_before

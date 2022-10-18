@@ -24,7 +24,7 @@ contract CompV3LenderBorrowerCloner {
         Strategy(_original).setStrategyParams(
             7_000, // targetLTVMultiplier (default: 7_000)
             8_000, // warningLTVMultiplier default: 8_000
-            1e10, // 2**256-1
+            1e10, // min rewards to sell
             false, // leave debt behind (default: false)
             1, // maxLoss (default: 1)
             60 * 1e9 // max base fee to perform non-emergency tends (default: 60 gwei)
@@ -71,7 +71,7 @@ contract CompV3LenderBorrowerCloner {
         Strategy(newStrategy).setStrategyParams(
             7_000, // targetLTVMultiplier (default: 7_000)
             8_000, // warningLTVMultiplier default: 8_000
-            1e10, // max debt to take
+            1e10, // min rewards to sell
             false, // leave debt behind (default: false)
             1, // maxLoss (default: 1)
             60 * 1e9 // max base fee to perform non-emergency tends (default: 60 gwei)
