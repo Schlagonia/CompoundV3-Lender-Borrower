@@ -141,6 +141,37 @@ def test_sweep(gov, vault, strategy, token, token_whale, borrow_whale, borrow_to
         == 1 * (10 ** borrow_token.decimals()) + before_balance
     )
 
+def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist, comet, yvault, borrow_token, amount, RELATIVE_APPROX):
+    user_balance_before = token.balanceOf(token_whale)
+    token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
+    vault.deposit(amount, {"from": token_whale})
+    
+    # Deposit to the vault
+    assert token.balanceOf(vault.address) == amount
+
+    # harvest
+    chain.sleep(1)
+    strategy.harvest({"from": strategist})
+    assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
+    chain.sleep(10)
+
+    assert borrow_token.balanceOf(strategy.address) == 0
+    comet.accrueAccount(strategy.address, {"from": strategist})
+    begining_debt = strategy.balanceOfDebt()
+    to_repay = yvault.balanceOf(strategy.address) * yvault.pricePerShare() / (10 ** yvault.decimals())
+    #Debt should be higher than borrow token amount so repay all of it
+    with reverts():
+        strategy.manualWithdrawAndRepayDebt(yvault.balanceOf(strategy.address), 1, {"from": token_whale})
+
+    with reverts():
+        strategy.manualWithdrawAndRepayDebt(yvault.balanceOf(strategy.address) + 100, 1, {"from": strategist})
+
+    strategy.manualWithdrawAndRepayDebt(yvault.balanceOf(strategy.address), 1, {"from": strategist})
+    assert borrow_token.balanceOf(strategy.address) == 0
+    assert  yvault.balanceOf(strategy.address) == 0
+    assert strategy.balanceOfDebt() < begining_debt
+
+
 """
 def test_triggers(gov, vault, strategy, token_whale, token, amount, accounts, comet):
     # Deposit to the vault and harvest

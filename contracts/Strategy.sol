@@ -194,8 +194,7 @@ contract Strategy is BaseStrategy {
         address _yVault,
         string memory _strategyName
     ) external {
-        address sender = msg.sender;
-        _initialize(_vault, sender, sender, sender);
+        _initialize(_vault,  msg.sender,  msg.sender,  msg.sender);
         _initializeThis(_comet, _ethToWantFee, _yVault, _strategyName);
     }
 
@@ -258,6 +257,16 @@ contract Strategy is BaseStrategy {
     }
 
     function adjustPosition(uint256 _debtOutstanding) internal override {
+        // If the cost to borrow > rewards rate we will pull out all funds to not report a loss
+        // We will rely on rewards to pay the interest and any returns from the vault are extra
+        // Do not expect the vault return to be > the borrow cost and harvest are speratic and cant
+        // always be relied on to cover the borrowing costs
+        if(getBorrowApr(0) > getRewardAprForBorrowBase(0)) {
+            //Liquidate everything so not to report a loss
+            liquidatePosition(balanceOfCollateral() + balanceOfWant());
+            return;
+        }
+
         uint256 wantBalance = balanceOfWant();
 
         // if we have enough want to deposit more, we do
@@ -293,14 +302,7 @@ contract Strategy is BaseStrategy {
         // HEALTHY(do nothing) (e.g. from 70% to 80% liqLTV)
         // UNHEALTHY(repay) (e.g. from 80% to 100% liqLTV)
 
-        // If the cost to borrow > rewards rate we will pull out all funds to not report a loss
-        // We will rely on rewards to pay the interest and any returns from the vault are extra
-        // Do not expect the vault return to be > the borrow cost and harvest are speratic and cant
-        // always be relied on to cover the borrowing costs
-        uint256 currentBorrowApr = getBorrowApr(0);
-        uint256 currentRewardApr = getRewardAprForBorrowBase(0);
-
-        if (targetLTV > currentLTV && currentBorrowApr < currentRewardApr) {
+        if (targetLTV > currentLTV) {
             // SUBOPTIMAL RATIO: our current Loan-to-Value is lower than what we want
             // AND costs are lower than our max acceptable costs
 
@@ -319,9 +321,10 @@ contract Strategy is BaseStrategy {
 
             //We want to make sure that the reward apr > borrow apr so we dont reprot a loss
             //Borrowing will cause the borrow apr to go up and the rewards apr to go down
-            uint256 expectedBorrowApr = getBorrowApr(_fromUsd(amountToBorrowUsd, baseToken));
-            uint256 expectedRewardApr = getRewardAprForBorrowBase(_fromUsd(amountToBorrowUsd, baseToken));
-            if(expectedBorrowApr > expectedRewardApr) {
+            if(
+                getBorrowApr(_fromUsd(amountToBorrowUsd, baseToken)) > 
+                getRewardAprForBorrowBase(_fromUsd(amountToBorrowUsd, baseToken))
+            ) {
                 //If we would push it over the limit dont borrow anything
                 amountToBorrowUsd = 0;
             }
@@ -344,9 +347,6 @@ contract Strategy is BaseStrategy {
                 _fromUsd(amountToRepayUsd, baseToken);
             _withdrawFromYVault(amountToRepayBT); // we withdraw from BaseToken vault
             _repayTokenDebt(); // we repay the BaseToken debt with compound
-        } else if(currentBorrowApr > currentRewardApr) {
-            //Liquidate everything so not to report a loss
-            liquidatePosition(estimatedTotalAssets());
         }
 
         if (balanceOfBaseToken() > 0) {
@@ -376,12 +376,13 @@ contract Strategy is BaseStrategy {
         // NOTE: repayment amount is in BaseToken
         // NOTE: collateral and debt calcs are done in USD
 
+        uint256 needed = _amountNeeded - balance;
         // We first repay whatever we need to repay to keep healthy ratios
-        _withdrawFromYVault(_calculateAmountToRepay(_amountNeeded)); 
+        _withdrawFromYVault(_calculateAmountToRepay(needed)); 
         // we repay the BaseToken debt with the amount withdrawn from the vault
         _repayTokenDebt();
         //Withdraw as much as we can up to the amount needed while maintaning a health ltv
-        _withdraw(address(want), Math.min(_amountNeeded, _maxWithdrawal()));
+        _withdraw(address(want), Math.min(needed, _maxWithdrawal()));
         // it will return the free amount of want
         balance = balanceOfWant();
         // we check if we withdrew less than expected AND should buy BaseToken with want (realising losses)
@@ -414,12 +415,8 @@ contract Strategy is BaseStrategy {
     }
 
     function prepareMigration(address _newStrategy) internal override {
-        //This assumes we will not take a loss. If that is not the case emergency exit should be set == true 
-        // and then harvest the strategy
-        //Withraw from vault first to know exactly how much we need to pay back
+        //Withraw from vault first to know exactly how much we can pay back
         yVault.withdraw(yVault.balanceOf(address(this)), address(this), maxLoss);
-        //Claim and sell all rewards to cover debt
-        _claimAndSellRewards();
         //Pay back debt and withdrawal all collateral
         _repayTokenDebt();
         _withdraw(address(want), _maxWithdrawal());
@@ -427,11 +424,6 @@ contract Strategy is BaseStrategy {
         uint256 baseBalance = balanceOfBaseToken();
         if(baseBalance > 0) {
             IERC20(baseToken).safeTransfer(_newStrategy, baseBalance);
-        }
-
-        uint256 compBalance = IERC20(comp).balanceOf(address(this));
-        if(compBalance > 0) {
-            IERC20(comp).safeTransfer(_newStrategy, baseBalance);
         }
     }
 
@@ -467,7 +459,9 @@ contract Strategy is BaseStrategy {
             (currentLTV < targetLTV && targetLTV - currentLTV > 1e17) || 
                 (getBorrowApr(0) > getRewardAprForBorrowBase(0)) // UNHEALTHY BORROWING COSTS
         ) {
-            return isBaseFeeAcceptable();
+            return 
+                IBaseFee(0xb5e1CAcB567d98faaDB60a1fD4820720141f064F)
+                    .isCurrentBaseFeeAcceptable();
         }
 
         return false;
@@ -632,8 +626,8 @@ contract Strategy is BaseStrategy {
     * @return The reward APR in USD as a decimal scaled up by 1e18
     */
     function getRewardAprForBorrowBase(uint256 newAmount) public view returns (uint256) {
-        // borrowBaseRewardApr = (rewardTokenPriceInUsd * rewardToSuppliersPerDay / (usdcTotalBorrow * usdcPriceInUsd)) * DAYS_PER_YEAR;
-        uint256 rewardToBorrowersPerDay =  comet.baseTrackingBorrowSpeed() * SECONDS_PER_DAY * (BASE_INDEX_SCALE / BASE_MANTISSA);
+        // borrowBaseRewardApr = (rewardTokenPriceInUsd * rewardToBorrowersPerDay / (usdcTotalBorrow * usdcPriceInUsd)) * DAYS_PER_YEAR;
+        uint256 rewardToBorrowersPerDay =  comet.baseTrackingBorrowSpeed() * SECONDS_PER_DAY * BASE_INDEX_SCALE / BASE_MANTISSA;
         return (getCompoundPrice(getPriceFeedAddress(comp)) * 
                     rewardToBorrowersPerDay / 
                         ((comet.totalBorrow() + newAmount) * 
@@ -868,10 +862,11 @@ contract Strategy is BaseStrategy {
         returns (address[] memory)
     {}
     
-    // check if the current baseFee is below our external target
-    function isBaseFeeAcceptable() internal view returns (bool) {
-        return
-            IBaseFee(0xb5e1CAcB567d98faaDB60a1fD4820720141f064F)
-                .isCurrentBaseFeeAcceptable();
+    //Manual function available to management to withdraw from vault and repay debt
+    function manualWithdrawAndRepayDebt(uint256 _amount, uint256 _maxLoss) external onlyAuthorized {
+        if(_amount > 0) {
+            yVault.withdraw(_amount, address(this), _maxLoss);
+        }
+        _repayTokenDebt();
     }
 }
