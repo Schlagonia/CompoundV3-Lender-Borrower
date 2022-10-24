@@ -155,67 +155,28 @@ def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist,
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
     chain.sleep(10)
 
-    assert borrow_token.balanceOf(strategy.address) == 0
+    
     comet.accrueAccount(strategy.address, {"from": strategist})
+    assert borrow_token.balanceOf(strategy.address) == 0
     begining_debt = strategy.balanceOfDebt()
-    to_repay = yvault.balanceOf(strategy.address) * yvault.pricePerShare() / (10 ** yvault.decimals())
+    #to_repay = yvault.balanceOf(strategy.address) * yvault.pricePerShare() / (10 ** yvault.decimals())
     #Debt should be higher than borrow token amount so repay all of it
+    #call from non-auth
     with reverts():
         strategy.manualWithdrawAndRepayDebt(yvault.balanceOf(strategy.address), 1, {"from": token_whale})
 
+    #call with more than we can withdraw
     with reverts():
         strategy.manualWithdrawAndRepayDebt(yvault.balanceOf(strategy.address) + 100, 1, {"from": strategist})
 
+    #withdraw and repay all
     strategy.manualWithdrawAndRepayDebt(yvault.balanceOf(strategy.address), 1, {"from": strategist})
     assert borrow_token.balanceOf(strategy.address) == 0
     assert  yvault.balanceOf(strategy.address) == 0
     assert strategy.balanceOfDebt() < begining_debt
 
-
-"""
-def test_triggers(gov, vault, strategy, token_whale, token, amount, accounts, comet):
-    # Deposit to the vault and harvest
-    token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
-    vault.deposit(amount, {"from": token_whale})
-    #vault.updateStrategyDebtRatio(strategy.address, 5_000, {"from": gov})
-
-    baseFee = Contract("0xb5e1CAcB567d98faaDB60a1fD4820720141f064F")
-    auth = accounts.at("0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7", force=True)
-    baseFee.setMaxAcceptableBaseFee(2000000000000, {"from": auth})
-    strategy.setProfitFactor(1000000000000000, {"from":gov})
-    strategy.setDebtThreshold(1000000000000000, {"from":gov})
-
-    assert strategy.tendTrigger(100) == False
-    assert strategy.harvestTrigger(100000) == True
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    
-    assert strategy.harvestTrigger(100000) == False
-    assert strategy.tendTrigger(1010) == False
-
-    strategy.setProfitFactor(1000000000000000, {"from":gov})
-    
-    #pull funds out to get above warnfing value
-    borrowed = comet.borrowBalanceOf(strategy.address)
-    print(f"Borrowed {borrowed}")
-    toBorrow = borrowed / 4
-    print(f"To Borrow {toBorrow}")
-    baseFeeGlobal = Contract("0xf8d0Ec04e94296773cE20eFbeeA82e76220cD549")
-    print(f"BaseFee global base fee: {baseFeeGlobal.basefee_global()}")
-    acct = accounts.at(strategy.address, force=True)
-    comet.withdraw(token.address, 100000000, {"from":acct})
-    chain.sleep(1)
-    assert strategy.tendTrigger(100) == True
-
-    strategy.tend({"from":gov})
-    assert strategy.tendTrigger(100) == False
-    
-    #change the ltv
-    token.approve(comet.address, 2**256 -1, {"from":token_whale})
-    comet.supplyTo(strategy.address, token, amount, {"from":token_whale})
-    assert strategy.tendTrigger(100) == True
-
-    strategy.tend({"from":gov})
-    assert strategy.tendTrigger(100) == False
-"""
-    
+    vault.withdraw({"from": token_whale})
+    assert (
+        pytest.approx(token.balanceOf(token_whale), rel=RELATIVE_APPROX)
+        == user_balance_before
+    )

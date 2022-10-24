@@ -259,11 +259,12 @@ contract Strategy is BaseStrategy {
     function adjustPosition(uint256 _debtOutstanding) internal override {
         // If the cost to borrow > rewards rate we will pull out all funds to not report a loss
         // We will rely on rewards to pay the interest and any returns from the vault are extra
-        // Do not expect the vault return to be > the borrow cost and harvest are speratic and cant
+        // Do not expect the vault return to be > the borrow cost, and harvest are speratic and can't
         // always be relied on to cover the borrowing costs
         if(getBorrowApr(0) > getRewardAprForBorrowBase(0)) {
             //Liquidate everything so not to report a loss
             liquidatePosition(balanceOfCollateral() + balanceOfWant());
+            //Return since we dont want to do anything else
             return;
         }
 
@@ -758,8 +759,9 @@ contract Strategy is BaseStrategy {
     function _buyBaseTokenWithWant(uint256 _amount) internal {
         //Need to account for both slippage and diff in the oracle price.
         //Should be only swapping very small amounts so its just to make sure there is no massive sandwhich
-        uint256 maxWantBalance = _fromUsd(_toUsd(_amount, baseToken), address(want)) * 11_000 / MAX_BPS;
-        if (maxWantBalance == 0) return;
+        uint256 maxWantBalance = _fromUsd(_toUsd(_amount, baseToken), address(want)) * 10_500 / MAX_BPS;
+        //Under 10 can cause rounding errors from token conversions, no need to swap that small amount  
+        if (maxWantBalance <= 10) return;
 
         //This should rarely if ever happen so we approve only what is needed
         IERC20(address(want)).safeApprove(address(router), 0);

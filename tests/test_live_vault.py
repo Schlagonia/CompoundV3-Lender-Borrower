@@ -32,7 +32,7 @@ def test_live_vault(live_vault, strategy, gov, token, token_whale, amount, comet
     prev_debt = comet.borrowBalanceOf(cloned_strategy.address)
     print(f"T=0 totalDebt: {prev_debt}")
 
-    # After first investment sleep for aproximately a month
+    # After first investment sleep for aproximately a day
     chain.sleep(60 * 60 * 24)
     chain.mine(1)
     new_debt =  comet.borrowBalanceOf(cloned_strategy.address)
@@ -43,6 +43,8 @@ def test_live_vault(live_vault, strategy, gov, token, token_whale, amount, comet
     cloned_strategy.harvest({"from": gov})
     assert vault.strategies(cloned_strategy).dict()["totalLoss"] == 0
 
+    chain.sleep(60 * 60 * 7)
+    
     vault.withdraw({"from": token_whale})
 
     # we are currently in a profitable scenario so there is no loss
