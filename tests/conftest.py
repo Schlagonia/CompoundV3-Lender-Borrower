@@ -199,11 +199,14 @@ def weth_vault(pm, gov, rewards, guardian, management, weth):
 
 @pytest.fixture
 def strategy(vault, Strategy, gov, cloner):
-    strategy = Strategy.at(cloner.original())
+    strategy = Strategy.at(cloner.originalStrategy())
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     chain.mine()
     yield strategy
 
+@pytest.fixture
+def depositer(cloner, Depositer):
+    depositer = Depositer.at(cloner.originalDepositer())
 
 @pytest.fixture
 def RELATIVE_APPROX():
@@ -215,7 +218,6 @@ def cloner(
     strategist,
     vault,
     CompV3LenderBorrowerCloner,
-    yvault,
     comet,
     ethToWantFee,
     token,
@@ -226,7 +228,6 @@ def cloner(
         vault,
         comet,
         ethToWantFee,
-        yvault,
         f"Strategy{token.symbol()}Lender{baseToken.symbol()}Borrower",
     )
 
