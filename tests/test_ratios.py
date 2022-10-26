@@ -112,5 +112,3 @@ def print_status(strat, v, yv):
     print(f"made up of {strat.balanceOfDebt()/(10**yv.decimals())} of debt owed")
     print(f"made up of {strat.balanceOfVault()/(10**yv.decimals())} of yvault assets")
     print(f"For a total base token owed bal of {strat.baseTokenOwedBalance()/(10**yv.decimals())}")
-    print(f"Current borrow apr: {strat.getBorrowApr(0)/1e18}")
-    print(f"current rewards apr is : {strat.getRewardAprForBorrowBase(0)/1e18}")

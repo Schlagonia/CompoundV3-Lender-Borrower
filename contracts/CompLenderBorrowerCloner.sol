@@ -67,7 +67,7 @@ contract CompV3LenderBorrowerCloner {
         }
 
         Strategy(newStrategy).initialize(_vault, _comet, _ethToWantFee, _yVault, _strategyName);
-
+        
         Strategy(newStrategy).setStrategyParams(
             7_000, // targetLTVMultiplier (default: 7_000)
             8_000, // warningLTVMultiplier default: 8_000

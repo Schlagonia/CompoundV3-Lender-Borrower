@@ -180,3 +180,57 @@ def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist,
         pytest.approx(token.balanceOf(token_whale), rel=RELATIVE_APPROX)
         == user_balance_before
     )
+
+
+def test_loss_and_airdrop(
+    token,
+    vault,
+    strategy,
+    token_whale,
+    strategist,
+    RELATIVE_APPROX,
+    chain,
+    borrow_token,
+    borrow_whale,
+    yvault,
+    amount,
+    gov
+):
+    user_balance_before = token.balanceOf(token_whale)
+    # Deposit to the vault
+    token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
+    vault.deposit(amount, {"from": token_whale})
+   
+    assert token.balanceOf(vault.address) == amount
+
+    # Harvest 1: Send funds through the strategy
+    chain.sleep(1)
+    strategy.harvest({"from": strategist})
+    assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
+
+    #simulate a loss
+    yshares = yvault.balanceOf(strategy.address)
+    yvault.withdraw(yshares /10, {"from": strategy.address})
+    balance = borrow_token.balanceOf(strategy.address)
+    borrow_token.transfer(gov, balance, {"from": strategy.address})
+
+    assert vault.strategies(strategy.address)["totalDebt"] > strategy.estimatedTotalAssets()
+
+    chain.sleep(1)
+
+    #airdrop back the amount of token = loss
+    borrow_token.transfer(strategy.address, balance, {"from": gov})
+
+    chain.sleep(1)
+    #make sure the health check is on so we cant report the loss
+    assert strategy.doHealthCheck() == True
+    strategy.harvest({"from": strategist})
+
+    chain.sleep(3600 * 6)  # 6 hrs needed for profits to unlock
+    chain.mine(1)
+
+    vault.withdraw({"from": token_whale})
+    assert (
+        pytest.approx(token.balanceOf(token_whale), rel=RELATIVE_APPROX)
+        == user_balance_before
+    )

@@ -16,7 +16,7 @@ compiler:
     version: 0.8.12
     optimizer:
       enabled: True
-      runs: 200
+      runs: 1
     remappings:
       - "@yearn/yearn-vaults=yearn/yearn-vaults@0.4.3-1sol8"
       - "@openzeppelin=OpenZeppelin/openzeppelin-contracts@4.4.1"

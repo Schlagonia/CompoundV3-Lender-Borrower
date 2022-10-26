@@ -26,10 +26,7 @@ def test_revoke_strategy_from_vault(
 
     vault.revokeStrategy(strategy.address, {"from": gov})
 
-    # Send some profit to yvault to compensate losses, so the strat is able to repay full amount
-    #chain.sleep(60*60)
-
-    chain.sleep(1)
+    chain.sleep(100)
     strategy.harvest({"from": gov})
 
     assert token.balanceOf(vault.address) >= amount
