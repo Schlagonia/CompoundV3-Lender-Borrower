@@ -28,10 +28,10 @@ def test_clone(
         "StrategyCompLender" + token.symbol() + "Borrower" + baseToken.symbol(),
     )
     cloned_strategy = Contract.from_abi(
-        "Strategy", clone_tx.events["Cloned"]["strategy"], strategy.abi
+        "Strategy", clone_tx.return_value["newStrategy"], strategy.abi
     )
     cloned_depositer = Contract.from_abi(
-        "Depositer", clone_tx.events["Cloned"]["depositer"], depositer.abi
+        "Depositer", clone_tx.return_value["newDepositer"], depositer.abi
     )
 
     cloned_strategy.setStrategyParams(
@@ -113,12 +113,11 @@ def test_clone_of_weth(
         "StrategyCompLender" + weth.symbol() + "Borrower" + baseToken.symbol(),
     )
     cloned_strategy = Contract.from_abi(
-        "Strategy", clone_tx.events["Cloned"]["clone"], strategy.abi
+        "Strategy", clone_tx.return_value["newStrategy"], strategy.abi
     )
     cloned_depositer = Contract.from_abi(
-        "Depositer", clone_tx.events["Cloned"]["depositer"], depositer.abi
+        "Depositer", clone_tx.return_value["newDepositer"], depositer.abi
     )
-
 
     cloned_strategy.setStrategyParams(
         strategy.targetLTVMultiplier(),
@@ -131,7 +130,7 @@ def test_clone_of_weth(
 
     # should fail due to already initialized
     with reverts():
-        cloned_strategy.initialize(weth_vault, comet, ethToWantFee, "NameRevert", {"from": gov})
+        cloned_strategy.initialize(weth_vault, comet, ethToWantFee, cloned_depositer, "NameRevert", {"from": gov})
 
     weth_vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     chain.sleep(1)
@@ -163,16 +162,10 @@ def test_clone_of_weth(
     chain.mine(1)
     print_debug(cloned_depositer, strategy, comet)
 
-    # why do we have losses? because of interests
-    with reverts():
-        weth_vault.withdraw()
-
-    # so we send profits
-    #baseToken.transfer(yvault, Wei("30_000 ether"), {"from": borrow_whale})
     weth_vault.withdraw({"from": weth_whale})
 
 def print_debug(dep, strategy, com):
-    supply_balance = dep.cometbalance()
+    supply_balance = dep.cometBalance()
     totalDebt = com.borrowBalanceOf(strategy)
     decimal = 10 ** com.baseScale()
     print(f"Strategy supply balance is: {supply_balance}")
@@ -184,7 +177,7 @@ def print_strat_status(strat, v, decimal):
     print(f"Estimated strat assets : {strat.estimatedTotalAssets()/decimals}")
     print(f"made up of {strat.balanceOfWant()/decimals} loose want")
     print(f"made up of {strat.balanceOfCollateral()/decimals} of Collateral")
-    print(f"{strat.getRewardsOwed()} in owed reward")
+    #print(f"{strat.getRewardsOwed()} in owed reward")
     print(f"made up of {strat.rewardsInWant()/decimals} rewards in want")
     print(f"made up of {strat.balanceOfDebt()/(10**decimal)} of debt owed")
     print(f"made up of {strat.balanceOfDepositer()/(10**decimal)} of yvault assets")

@@ -51,7 +51,7 @@ def test_profitable_harvest(
     chain,
     borrow_token,
     borrow_whale,
-    yvault,
+    depositer,
     amount
 ):
     # Deposit to the vault
@@ -74,7 +74,6 @@ def test_profitable_harvest(
     chain.sleep(10 * 24 * 3600 + 1)  # sleep during cooldown
     chain.mine(1)
 
-    borrow_token.transfer(yvault, yvault.totalAssets() * 0.005, {"from": borrow_whale})
     before_pps = vault.pricePerShare()
     # Harvest 2: Realize profit
     chain.sleep(1)
@@ -141,7 +140,7 @@ def test_sweep(gov, vault, strategy, token, token_whale, borrow_whale, borrow_to
         == 1 * (10 ** borrow_token.decimals()) + before_balance
     )
 
-def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist, comet, yvault, borrow_token, amount, RELATIVE_APPROX):
+def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist, comet, depositer, borrow_token, amount, RELATIVE_APPROX):
     user_balance_before = token.balanceOf(token_whale)
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(amount, {"from": token_whale})
@@ -155,24 +154,23 @@ def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist,
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
     chain.sleep(10)
 
-    
-    comet.accrueAccount(strategy.address, {"from": strategist})
+    comet.accrueAccount(depositer.address, {"from": strategist})
     assert borrow_token.balanceOf(strategy.address) == 0
     begining_debt = strategy.balanceOfDebt()
-    #to_repay = yvault.balanceOf(strategy.address) * yvault.pricePerShare() / (10 ** yvault.decimals())
-    #Debt should be higher than borrow token amount so repay all of it
+
     #call from non-auth
     with reverts():
-        strategy.manualWithdrawAndRepayDebt(yvault.balanceOf(strategy.address), 1, {"from": token_whale})
+        strategy.manualWithdrawAndRepayDebt(depositer.cometBalance(), {"from": token_whale})
 
     #call with more than we can withdraw
     with reverts():
-        strategy.manualWithdrawAndRepayDebt(yvault.balanceOf(strategy.address) + 100, 1, {"from": strategist})
+        strategy.manualWithdrawAndRepayDebt(depositer.cometBalance() + 100, {"from": strategist})
 
     #withdraw and repay all
-    strategy.manualWithdrawAndRepayDebt(yvault.balanceOf(strategy.address), 1, {"from": strategist})
+    toWithdraw = depositer.accruedCometBalance({"from":strategist})
+    strategy.manualWithdrawAndRepayDebt(toWithdraw.return_value, {"from": strategist})
     assert borrow_token.balanceOf(strategy.address) == 0
-    assert  yvault.balanceOf(strategy.address) == 0
+    assert  depositer.cometBalance() == 0
     assert strategy.balanceOfDebt() < begining_debt
 
     vault.withdraw({"from": token_whale})
@@ -192,7 +190,7 @@ def test_loss_and_airdrop(
     chain,
     borrow_token,
     borrow_whale,
-    yvault,
+    depositer,
     amount,
     gov
 ):
@@ -209,8 +207,8 @@ def test_loss_and_airdrop(
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
 
     #simulate a loss
-    yshares = yvault.balanceOf(strategy.address)
-    yvault.withdraw(yshares /10, {"from": strategy.address})
+    yshares = depositer.cometBalance()
+    depositer.withdraw(yshares /10, {"from": strategy.address})
     balance = borrow_token.balanceOf(strategy.address)
     borrow_token.transfer(gov, balance, {"from": strategy.address})
 

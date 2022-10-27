@@ -11,7 +11,7 @@ def test_revoke_with_profit(
     RELATIVE_APPROX,
     borrow_token,
     borrow_whale,
-    yvault,
+    depositer,
     comet,
     amount
 ):
@@ -21,9 +21,10 @@ def test_revoke_with_profit(
     chain.sleep(1)
     strategy.harvest({"from": gov})
 
-    # Send some profit to yvault
+    #Profit
     chain.sleep(60 * 60 *12)
     vault.revokeStrategy(strategy, {"from": gov})
     strategy.harvest({"from": gov})
     assert vault.strategies(strategy).dict()["totalGain"] > 0
     assert vault.strategies(strategy).dict()["totalDebt"] <= 1
+

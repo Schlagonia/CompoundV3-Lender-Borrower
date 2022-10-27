@@ -29,7 +29,7 @@ def test_direct_transfer_increments_profits(vault, strategy, token, token_whale,
     assert pytest.approx(vault.strategies(strategy).dict()["totalGain"], rel=RELATIVE_APPROX) == amount
 
 
-def test_borrow_token_transfer_sends_to_yvault(
+def test_borrow_token_transfer_sends_to_depositer(
     vault, strategy, token, token_whale, borrow_token, borrow_whale, gov, amount
 ):
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
@@ -45,21 +45,21 @@ def test_borrow_token_transfer_sends_to_yvault(
     assert borrow_token.balanceOf(strategy) == 0
 
 
-def test_borrow_token_transfer_increments_yshares(
-    vault, yvault, strategy, token, token_whale, borrow_token, borrow_whale, gov, amount
+def test_borrow_token_transfer_increments(
+    vault, depositer, strategy, token, token_whale, borrow_token, borrow_whale, gov, amount
 ):
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(amount, {"from": token_whale})
 
     chain.sleep(1)
     strategy.harvest({"from": gov})
-    initialBalance = yvault.balanceOf(strategy)
+    initialBalance = depositer.cometBalance()
 
     amount = 1_000 * (10 ** borrow_token.decimals())
     borrow_token.transfer(strategy, amount, {"from": borrow_whale})
 
     strategy.harvest({"from": gov})
-    assert yvault.balanceOf(strategy) > initialBalance
+    assert depositer.cometBalance() > initialBalance
 
 
 def test_borrow_token_transfer_increments_profits(
@@ -95,7 +95,7 @@ def test_deposit_should_not_increment_profits(vault, strategy, token, token_whal
 
 
 def test_direct_transfer_with_actual_profits(
-    vault, strategy, token, token_whale, borrow_token, borrow_whale, yvault, gov, 
+    vault, strategy, token, token_whale, borrow_token, borrow_whale, depositer, gov, 
 ):
     initialProfit = vault.strategies(strategy).dict()["totalGain"]
     assert initialProfit == 0
@@ -106,9 +106,9 @@ def test_direct_transfer_with_actual_profits(
     chain.sleep(1)
     strategy.harvest({"from": gov})
 
-    # send some profit to yvault
+    # send some profit to depositer
     borrow_token.transfer(
-        yvault, 20_000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
+        depositer, 20_000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
     )
 
     # sleep for a day

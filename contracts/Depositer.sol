@@ -34,8 +34,8 @@ contract Depositer {
     uint64 internal constant DAYS_PER_YEAR = 365;
     uint64 internal constant SECONDS_PER_DAY = 60 * 60 * 24;
     uint64 internal constant SECONDS_PER_YEAR = 365 days;
-    uint64 internal BASE_MANTISSA;
-    uint64 internal BASE_INDEX_SCALE;
+    uint256 internal BASE_MANTISSA;
+    uint256 internal BASE_INDEX_SCALE;
     
     //This is the address of the main V3 pool
     Comet public comet;
@@ -132,26 +132,31 @@ contract Depositer {
         comet = Comet(_comet);
         baseToken = IERC20(comet.baseToken());
 
+        baseToken.safeApprove(_comet, type(uint256).max);
+
         //For APR calculations
-        BASE_MANTISSA = uint64(comet.baseScale());
-        BASE_INDEX_SCALE = uint64(comet.baseIndexScale());
+        BASE_MANTISSA = comet.baseScale();
+        BASE_INDEX_SCALE = comet.baseIndexScale();
     }
 
-    function setStrategy() public {
+    function setStrategy(address _strategy) external {
         //Can only set the strategy once
         require(address(strategy) == address(0), "set");
-        //Cache a instance of the strategy to do some checks before setting it
-        IStrategy _strategy = IStrategy(msg.sender);
+
+        strategy = IStrategy(_strategy);
 
         //make sure it has the same base token
-        require(address(baseToken) == _strategy.baseToken(), "!base");
+        require(address(baseToken) == strategy.baseToken(), "!base");
         //Make sure this contract is set as the depositer
-        require(address(this) == _strategy.depositer(), "!depositer");
-
-        strategy = _strategy;
+        require(address(this) == address(strategy.depositer()), "!depositer");
     }
     
     function cometBalance() public view returns (uint256){
+        return comet.balanceOf(address(this));
+    }
+
+    function accruedCometBalance() public returns(uint256) {
+        comet.accrueAccount(address(this));
         return comet.balanceOf(address(this));
     }
 
@@ -267,7 +272,7 @@ contract Depositer {
         unchecked {
             uint256 rewardToBorrowersPerDay =  comet.baseTrackingBorrowSpeed() * SECONDS_PER_DAY * BASE_INDEX_SCALE / BASE_MANTISSA;
             if(rewardToBorrowersPerDay == 0) return 0;
-            return (getCompoundPrice(getPriceFeedAddress(comp)) * 
+            return (getCompoundPrice(comp) * 
                         rewardToBorrowersPerDay / 
                             ((comet.totalBorrow() + newAmount) * 
                                 getCompoundPrice(address(baseToken)))) * 
@@ -289,8 +294,6 @@ contract Depositer {
     function getCompoundPrice(address asset) internal view returns (uint256) {
         return comet.getPrice(getPriceFeedAddress(asset));
     }
-
-
     function manualWithdraw() external onlyGovernance {
         //Withdraw everything we have
         comet.withdraw(address(baseToken), cometBalance());

@@ -20,10 +20,14 @@ contract CompV3LenderBorrowerCloner {
     ) {
         Depositer _depositer = new Depositer(_comet);
         Strategy _strategy = new Strategy(_vault, _comet, _ethToWantFee, address(_depositer), _strategyName);
-        emit Deployed(address(_depositer), address(_strategy));
 
         originalDepositer = address(_depositer);
         originalStrategy = address(_strategy);
+
+        emit Deployed(originalDepositer, originalStrategy);
+
+        _depositer.setStrategy(originalStrategy);
+
         Strategy(_strategy).setStrategyParams(
             7_000, // targetLTVMultiplier (default: 7_000)
             8_000, // warningLTVMultiplier default: 8_000
@@ -49,8 +53,8 @@ contract CompV3LenderBorrowerCloner {
         address _comet,
         uint24 _ethToWantFee,
         string memory _strategyName
-    ) external returns (address newStrategy) {
-        address newDepositer = Depositer(originalDepositer).cloneDepositer(_comet);
+    ) external returns (address newDepositer, address newStrategy) {
+        newDepositer = Depositer(originalDepositer).cloneDepositer(_comet);
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
         bytes20 addressBytes = bytes20(originalStrategy);
         assembly {
@@ -69,6 +73,8 @@ contract CompV3LenderBorrowerCloner {
         }
 
         Strategy(newStrategy).initialize(_vault, _comet, _ethToWantFee, newDepositer, _strategyName);
+
+        Depositer(newDepositer).setStrategy(newStrategy);
         
         Strategy(newStrategy).setStrategyParams(
             7_000, // targetLTVMultiplier (default: 7_000)

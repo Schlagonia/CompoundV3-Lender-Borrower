@@ -10,7 +10,7 @@ def test_migration(
     token_whale,
     borrow_token,
     borrow_whale,
-    yvault,
+    depositer,
     cloner,
     strategist,
     amount,
@@ -35,9 +35,8 @@ def test_migration(
             strategist,
             comet,
             ethToWantFee,
-            yvault,
             "name",
-        ).return_value
+        ).return_value["newStrategy"]
     )
 
     old_debt_ratio = vault.strategies(strategy).dict()["debtRatio"]

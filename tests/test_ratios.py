@@ -9,7 +9,7 @@ def test_lev_ratios(
     token_whale,
     borrow_token,
     borrow_whale,
-    yvault,
+    depositer,
     comet,
     amount
 ):
@@ -22,7 +22,7 @@ def test_lev_ratios(
 
     targetLTV = strategy.targetLTVMultiplier()
 
-    print_status(strategy, vault, yvault)
+    print_status(strategy, vault, comet.baseScale())
     # should revert with ratios > 90%
     with reverts():
         strategy.setStrategyParams(
@@ -30,7 +30,6 @@ def test_lev_ratios(
             9_001,
             strategy.minToSell(),
             strategy.leaveDebtBehind(),
-            strategy.maxLoss(),
             strategy.maxGasPriceToTend(),
             {"from": strategy.strategist()},
         )
@@ -41,7 +40,6 @@ def test_lev_ratios(
             7_000,
             strategy.minToSell(),
             strategy.leaveDebtBehind(),
-            strategy.maxLoss(),
             strategy.maxGasPriceToTend(),
             {"from": strategy.strategist()},
         )
@@ -52,37 +50,36 @@ def test_lev_ratios(
         targetLTV / 1.01,
         strategy.minToSell(),
         strategy.leaveDebtBehind(),
-        strategy.maxLoss(),
         strategy.maxGasPriceToTend(),
         {"from": strategy.strategist()},
     )
     # to offset interest rates and be able to repay full debt (assuming we were able to generate profit before lowering acceptableCosts)
     #borrow_token.transfer(
-    #    yvault, 10_000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
+    #    depositer, 10_000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
     #)
     previousDebt = comet.borrowBalanceOf(strategy)
     tx = strategy.harvest({"from": gov})
     assert previousDebt > comet.borrowBalanceOf(strategy)
-    print_status(strategy, vault, yvault)
+    print_status(strategy, vault, 10**comet.baseScale())
 
-    print_status(strategy, vault, yvault)
+    print_status(strategy, vault, comet.baseScale())
     # we reduce the target to half and set target ratio = 0
     strategy.setStrategyParams(
         0, 
         targetLTV / 3,  # trigger to set to rebalance
         strategy.minToSell(),
         strategy.leaveDebtBehind(),
-        strategy.maxLoss(),
         strategy.maxGasPriceToTend(),
         {"from": strategy.strategist()},
     )
     # to offset interest rates and be able to repay full debt (assuming we were able to generate profit before lowering acceptableCosts)
     #borrow_token.transfer(
-    #    yvault, 10000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
+    #    depositer, 10000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
     #)
+    chain.slee(1)
     previousDebt = comet.borrowBalanceOf(strategy)
     strategy.harvest({"from": gov})
-    print_status(strategy, vault, yvault)
+    print_status(strategy, vault, comet.baseScale())
 
     assert comet.borrowBalanceOf(strategy) == 0
     assert token.balanceOf(strategy) == 0
@@ -95,20 +92,20 @@ def test_lev_ratios(
     print(f"Collateral: {strategy.balanceOfCollateral()}")
     print(f"Value of users holding {vault.balanceOf(token_whale) * vault.pricePerShare() / (10**vault.decimals())}")
     #borrow_token.transfer(
-    #    yvault, 1000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
+    #    depositer, 1000 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
     #)
 
     vault.withdraw({"from": token_whale})
     
 
-def print_status(strat, v, yv):
-    print(f"Infpr fpr {strat.name()}")
+def print_status(strat, v, decimal):
+    print(f"Info fpr {strat.name()}")
     decimals = 10 ** v.decimals()
     print(f"Estimated strat assets : {strat.estimatedTotalAssets()/decimals}")
     print(f"made up of {strat.balanceOfWant()/decimals} loose want")
     print(f"made up of {strat.balanceOfCollateral()/decimals} of Collateral")
-    print(f"{strat.getRewardsOwed()} in owed reward")
+    #print(f"{strat.getRewardsOwed()} in owed reward")
     print(f"made up of {strat.rewardsInWant()/decimals} rewards in want")
-    print(f"made up of {strat.balanceOfDebt()/(10**yv.decimals())} of debt owed")
-    print(f"made up of {strat.balanceOfVault()/(10**yv.decimals())} of yvault assets")
-    print(f"For a total base token owed bal of {strat.baseTokenOwedBalance()/(10**yv.decimals())}")
+    print(f"made up of {strat.balanceOfDebt()/(10**decimal)} of debt owed")
+    print(f"made up of {strat.balanceOfDepositer()/(10**decimal)} of yvault assets")
+    print(f"For a total base token owed bal of {strat.baseTokenOwedBalance()/(10**decimal)}")

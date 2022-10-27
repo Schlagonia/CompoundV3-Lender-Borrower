@@ -29,6 +29,7 @@ interface IDepositer{
     function setStrategy() external;
     function claimRewards() external;
     function getRewardsOwed() external view returns (uint256);
+    function accruedCometBalance() external returns (uint256);
     function getNetBorrowApr(uint256) external view returns (uint256);
     function getNetRewardApr(uint256) external view returns(uint256);
     function withdraw(uint256 _amount) external;
@@ -171,11 +172,9 @@ contract Strategy is BaseStrategy {
         baseToken = comet.baseToken();
         minThreshold = comet.baseBorrowMin();
 
-        require(baseToken == address(depositer.baseToken()));
         depositer = IDepositer(_depositer);
-        //Set the strategy on the depositer
-        depositer.setStrategy();
-        
+        require(baseToken == address(depositer.baseToken()), "!base");
+   
         //For APR calculations
         //BASE_MANTISSA = uint64(comet.baseScale());
         //BASE_INDEX_SCALE = uint64(comet.baseIndexScale());
@@ -231,8 +230,10 @@ contract Strategy is BaseStrategy {
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
 
         // claim rewards, even out baseToken deposits and borrows and sell remainder to want
-        //This will accrue the account as well so all future calls are accurate
+        //This will accrue this account as well so all future calls are accurate
         _claimAndSellRewards();
+        //accrue the depositer so base token amounts are accurate
+        comet.accrueAccount(address(depositer));
 
         //base token owed should be 0 here but we count it just in case
         uint256 totalAssetsAfterProfit = 
@@ -376,7 +377,7 @@ contract Strategy is BaseStrategy {
         // NOTE: collateral and debt calcs are done in USD
 
         uint256 needed = _amountNeeded - balance;
-        //Accrue account for accurate balances
+        //Accrue accounts for accurate balances
         comet.accrueAccount(address(this));
         // We first repay whatever we need to repay to keep healthy ratios
         _withdrawFromDepositer(_calculateAmountToRepay(needed)); 
@@ -416,8 +417,8 @@ contract Strategy is BaseStrategy {
     }
 
     function prepareMigration(address _newStrategy) internal override {
-        //Withraw from vault first to know exactly how much we can pay back
-        depositer.withdraw(depositer.cometBalance());
+        //Withraw from depositer first to know exactly how much we can pay back
+        depositer.withdraw(depositer.accruedCometBalance());
 
         //Accrue account for accurate balances
         comet.accrueAccount(address(this));
@@ -493,10 +494,11 @@ contract Strategy is BaseStrategy {
         _amountBT = balancePrior >= _amountBT ? 0 : _amountBT - balancePrior;
         if (_amountBT == 0) return;
 
+        //Make sure we have enough balance. This accrues the account first.
         _amountBT =
             Math.min(
                 _amountBT,
-                depositer.cometBalance()
+                depositer.accruedCometBalance()
             );
         //need to check liquidity of the comet
         _amountBT =

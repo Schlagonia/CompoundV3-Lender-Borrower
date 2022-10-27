@@ -206,7 +206,7 @@ def strategy(vault, Strategy, gov, cloner):
 
 @pytest.fixture
 def depositer(cloner, Depositer):
-    depositer = Depositer.at(cloner.originalDepositer())
+    yield Depositer.at(cloner.originalDepositer())
 
 @pytest.fixture
 def RELATIVE_APPROX():
