@@ -49,13 +49,6 @@ contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
     using Address for address;
 
-    /*Used for Comp apr calculations
-    uint64 internal constant DAYS_PER_YEAR = 365;
-    uint64 internal constant SECONDS_PER_DAY = 60 * 60 * 24;
-    uint64 internal constant SECONDS_PER_YEAR = 365 days;
-    uint64 internal BASE_MANTISSA;
-    uint64 internal BASE_INDEX_SCALE;
-*/
     // if set to true, the strategy will not try to repay debt by selling want
     bool public leaveDebtBehind;
 
@@ -175,10 +168,6 @@ contract Strategy is BaseStrategy {
         depositer = IDepositer(_depositer);
         require(baseToken == address(depositer.baseToken()), "!base");
    
-        //For APR calculations
-        //BASE_MANTISSA = uint64(comet.baseScale());
-        //BASE_INDEX_SCALE = uint64(comet.baseIndexScale());
-
         want.safeApprove(_comet, type(uint256).max);
         IERC20(baseToken).safeApprove(_comet, type(uint256).max);
         IERC20(baseToken).safeApprove(_depositer, type(uint256).max);
@@ -230,11 +219,9 @@ contract Strategy is BaseStrategy {
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
 
         // claim rewards, even out baseToken deposits and borrows and sell remainder to want
-        //This will accrue this account as well so all future calls are accurate
+        //This will accrue this account as well as the depositer so all future calls are accurate
         _claimAndSellRewards();
-        //accrue the depositer so base token amounts are accurate
-        comet.accrueAccount(address(depositer));
-
+ 
         //base token owed should be 0 here but we count it just in case
         uint256 totalAssetsAfterProfit = 
             balanceOfWant() + 
@@ -344,7 +331,7 @@ contract Strategy is BaseStrategy {
             // we repay debt to set it to targetLTV
             uint256 targetDebtUsd = targetLTV * collateralInUsd / 1e18;
             
-            //Withdraw the difference from the vault
+            //Withdraw the difference from the Depositer
             _withdrawFromDepositer(_fromUsd(debtInUsd - targetDebtUsd, baseToken)); // we withdraw from BaseToken vault
             _repayTokenDebt(); // we repay the BaseToken debt with compound
         }
@@ -377,7 +364,7 @@ contract Strategy is BaseStrategy {
         // NOTE: collateral and debt calcs are done in USD
 
         uint256 needed = _amountNeeded - balance;
-        //Accrue accounts for accurate balances
+        //Accrue account for accurate balances
         comet.accrueAccount(address(this));
         // We first repay whatever we need to repay to keep healthy ratios
         _withdrawFromDepositer(_calculateAmountToRepay(needed)); 
@@ -394,10 +381,10 @@ contract Strategy is BaseStrategy {
             balanceOfBaseToken() + balanceOfDepositer() == 0 && // but no capital to repay
             !leaveDebtBehind // if set to true, the strategy will not try to repay debt by selling want
         ) {
-            // using this part of code will result in losses but it is necessary to unlock full collateral in case of wind down
+            // using this part of code may result in losses but it is necessary to unlock full collateral in case of wind down
             //This should only occur when depleting the strategy so we want to swap the full amount of our debt
-            // we buy BaseToken with Want
-            _buyBaseTokenWithWant(balanceOfDebt());
+            //we buy BaseToken first with available rewards then with Want
+            _buyBaseToken(balanceOfDebt());
 
             // we repay debt to actually unlock collateral
             // after this, balanceOfDebt should be 0
@@ -439,7 +426,7 @@ contract Strategy is BaseStrategy {
 
     function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
         if(super.harvestTrigger(callCostInWei)) {
-            isBaseFeeAcceptable();
+            return isBaseFeeAcceptable();
         }
     }
 
@@ -625,6 +612,8 @@ contract Strategy is BaseStrategy {
         return _fromUsd(_toUsd(depositer.getRewardsOwed(), comp), address(want)) * 9_000 / MAX_BPS;
     }
 
+    //We put teh logic for these functions in the depositer contract to save byte code in the main strategy
+
     function getNetBorrowApr(uint256 newAmount) public view returns(uint256 netApr) {
         depositer.getNetRewardApr(newAmount);
     }
@@ -686,10 +675,8 @@ contract Strategy is BaseStrategy {
 
     function _claimRewards() internal {
         rewardsContract.claim(address(comet), address(this), true);
-        //Pull rewards from depositer if supply is incentivized
-        if(comet.baseTrackingSupplySpeed() > 0) {
-            depositer.claimRewards();
-        }
+        //Pull rewards from depositer even if not incentivised to accrue the account
+        depositer.claimRewards();   
     }
 
     function _claimAndSellRewards() internal {
@@ -721,17 +708,26 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function _buyBaseTokenWithWant(uint256 _amount) internal {
-        //Need to account for both slippage and diff in the oracle price.
-        //Should be only swapping very small amounts so its just to make sure there is no massive sandwhich
-        uint256 maxWantBalance = _fromUsd(_toUsd(_amount, baseToken), address(want)) * 10_500 / MAX_BPS;
-        //Under 10 can cause rounding errors from token conversions, no need to swap that small amount  
-        if (maxWantBalance <= 10) return;
+    //Thi should only ever get called when withdrawing all funds from the strategy if there is debt left over.
+    //It will first try and sell rewards for the needed amount of base token. then will swap want
+    function _buyBaseToken(uint256 _amount) internal {
+        //We should be able to get the needed amount from rewards tokens. 
+        //We first try that before swapping want and reporting losses.
+        _claimAndSellRewards();
 
-        //This should rarely if ever happen so we approve only what is needed
-        IERC20(address(want)).safeApprove(address(router), 0);
-        IERC20(address(want)).safeApprove(address(router), maxWantBalance);
-        _swapFrom(address(want), baseToken, _amount, maxWantBalance);   
+        //Check if our debt balance is still greater than our base token balance
+        if(baseTokenOwedBalance() > 0) {
+            //Need to account for both slippage and diff in the oracle price.
+            //Should be only swapping very small amounts so its just to make sure there is no massive sandwhich
+            uint256 maxWantBalance = _fromUsd(_toUsd(baseTokenOwedBalance(), baseToken), address(want)) * 10_500 / MAX_BPS;
+            //Under 10 can cause rounding errors from token conversions, no need to swap that small amount  
+            if (maxWantBalance <= 10) return;
+
+            //This should rarely if ever happen so we approve only what is needed
+            IERC20(address(want)).safeApprove(address(router), 0);
+            IERC20(address(want)).safeApprove(address(router), maxWantBalance);
+            _swapFrom(address(want), baseToken, _amount, maxWantBalance);   
+        }
     }
 
     function _swapTo(address _from, address _to, uint256 _amountFrom) internal {

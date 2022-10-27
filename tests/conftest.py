@@ -164,7 +164,10 @@ def weth_amout(user, weth):
     user.transfer(weth, weth_amout)
     yield weth_amout
 
-
+@pytest.fixture
+def rewardsContract():
+    yield Contract("0x1B0e765F6224C21223AeA2af16c1C46E38885a40")
+    
 @pytest.fixture
 def registry():
     yield Contract("0x50c1a2eA0a861A967D9d0FFE2AE4012c2E053804")

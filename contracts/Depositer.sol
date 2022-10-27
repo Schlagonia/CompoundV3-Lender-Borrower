@@ -5,8 +5,6 @@ pragma experimental ABIEncoderV2;
 import {IVault} from "./interfaces/IVault.sol";
 import {IStrategy} from "./interfaces/IStrategy.sol";
 
-import "./interfaces/IERC20Extended.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -56,41 +54,18 @@ contract Depositer {
         _;
     }
 
-    modifier onlyManagement() {
-        checkManagement();
-        _;
-    }
-
     modifier onlyStrategy() {
         checkStrategy();
         _;
     }
 
     function checkGovernance() internal view {
-        require(isGovernance(), "!authorized");
+        require(msg.sender == strategy.vault().governance(), "!authorized");
     }
 
-    function checkManagement() internal view {
-        require(isGovernance() || isManagement(), "!authorized");
-    }
 
     function checkStrategy() internal view {
-        require(isStrategy(), "!authorized");
-    }
-
-    function isGovernance() internal view returns (bool) {
-        return
-            msg.sender == strategy.vault().governance();
-    }
-
-    function isManagement() internal view returns (bool) {
-        return
-            msg.sender == strategy.strategist();
-    }
-
-    function isStrategy() internal view returns (bool) {
-        return 
-            msg.sender == address(strategy);
+        require(msg.sender == address(strategy), "!authorized");
     }
 
     constructor(address _comet) {
@@ -155,6 +130,7 @@ contract Depositer {
         return comet.balanceOf(address(this));
     }
 
+    //Non-view function to accrue account for most accurate accounting
     function accruedCometBalance() public returns(uint256) {
         comet.accrueAccount(address(this));
         return comet.balanceOf(address(this));
@@ -193,7 +169,7 @@ contract Depositer {
     //We put these in the depositer contract to save byte code in the main strategy
 
     /*
-    * Gets the amount of reward tokens due to this contract address
+    * Gets the amount of reward tokens due to this contract and the base strategy
     */
     function getRewardsOwed() public view returns (uint256) {
         CometStructs.RewardConfig memory config = rewardsContract.rewardConfig(address(comet));
@@ -294,9 +270,10 @@ contract Depositer {
     function getCompoundPrice(address asset) internal view returns (uint256) {
         return comet.getPrice(getPriceFeedAddress(asset));
     }
+
     function manualWithdraw() external onlyGovernance {
         //Withdraw everything we have
-        comet.withdraw(address(baseToken), cometBalance());
+        comet.withdraw(address(baseToken), accruedCometBalance());
         //Transfer the full balance to Gov
         baseToken.transfer(
             strategy.vault().governance(), 

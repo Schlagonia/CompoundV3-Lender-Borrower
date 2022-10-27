@@ -170,7 +170,7 @@ def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist,
     toWithdraw = depositer.accruedCometBalance({"from":strategist})
     strategy.manualWithdrawAndRepayDebt(toWithdraw.return_value, {"from": strategist})
     assert borrow_token.balanceOf(strategy.address) == 0
-    assert  depositer.cometBalance() == 0
+    assert  depositer.cometBalance() < toWithdraw.return_value
     assert strategy.balanceOfDebt() < begining_debt
 
     vault.withdraw({"from": token_whale})
@@ -232,3 +232,82 @@ def test_loss_and_airdrop(
         pytest.approx(token.balanceOf(token_whale), rel=RELATIVE_APPROX)
         == user_balance_before
     )
+
+def test_claim_rewards_accrues_account(
+    token,
+    vault,
+    strategy,
+    token_whale,
+    gov,
+    RELATIVE_APPROX,
+    borrow_token,
+    borrow_whale,
+    depositer,
+    comet,
+    amount,
+    rewardsContract
+):
+    token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
+    vault.deposit(amount, {"from": token_whale})
+
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+
+    #Profit
+    chain.sleep(60 * 60 *6)
+
+    supplied = depositer.cometBalance()
+    borrowed = strategy.balanceOfDebt()
+
+    rewardsContract.claim(comet.address, depositer.address, True, {"from": gov})
+    #Make sure the call did not fail and it accrued only the depositer contract
+    assert depositer.cometBalance() > supplied
+
+
+def test_depositer_fucntions(
+    token,
+    vault,
+    strategy,
+    token_whale,
+    gov,
+    RELATIVE_APPROX,
+    borrow_token,
+    borrow_whale,
+    depositer,
+    comet,
+    amount,
+    rewardsContract
+):
+    token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
+    vault.deposit(amount, {"from": token_whale})
+
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+
+    #Profit
+    chain.sleep(60 * 60 *6)
+
+    with reverts():
+        depositer.deposit({"from": borrow_whale})
+
+    toWithdraw = depositer.cometBalance()
+    with reverts():
+        depositer.withdraw(toWithdraw, {"from": gov})
+
+    with reverts():
+        depositer.claimRewards({"from":gov})
+
+    with reverts():
+        depositer.manualWithdraw({"from": borrow_whale})
+
+    assert depositer.getNetBorrowApr(0) > 0
+    assert depositer.getNetRewardApr(0) > 0
+
+    print(f"Net borrow apr {depositer.getNetBorrowApr(0) * 100}. Net reward apr {depositer.getNetRewardApr(0) * 100}")
+    assert depositer.getNetRewardApr(0) > depositer.getNetRewardApr(10000e6)
+
+    before_balance = borrow_token.balanceOf(gov)
+    depositer.manualWithdraw({"from":gov})
+
+    assert borrow_token.balanceOf(gov) > before_balance
+    assert depositer.cometBalance() == 0

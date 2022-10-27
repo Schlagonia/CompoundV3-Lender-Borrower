@@ -47,6 +47,15 @@ def test_clone(
     with reverts():
         cloned_strategy.initialize(vault, comet, ethToWantFee, cloned_depositer, "NameRevert", {"from": gov})
 
+    with reverts():
+        cloned_depositer.initialize(comet, {"from": gov})
+    
+    with reverts():
+        cloned_depositer.setStrategy(cloned_strategy.address, {"from": gov})
+
+    with reverts():
+        cloned_depositer.cloneDepositer(comet, {"from":gov})
+
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
     vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
 
@@ -131,6 +140,15 @@ def test_clone_of_weth(
     # should fail due to already initialized
     with reverts():
         cloned_strategy.initialize(weth_vault, comet, ethToWantFee, cloned_depositer, "NameRevert", {"from": gov})
+    
+    with reverts():
+        cloned_depositer.initialize(comet, {"from": gov})
+
+    with reverts():
+        cloned_depositer.setStrategy(cloned_strategy.address, {"from": gov})
+
+    with reverts():
+        cloned_depositer.cloneDepositer(comet, {"from":gov})
 
     weth_vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     chain.sleep(1)
