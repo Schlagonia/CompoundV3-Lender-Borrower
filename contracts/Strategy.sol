@@ -30,7 +30,7 @@ interface IBaseFeeGlobal {
  *   Made by @Schlagonia
  *   https://github.com/Schlagonia/CompoundV3-Lender-Borrower
  *
- ********************* */
+ ********************** */
 
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
