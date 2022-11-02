@@ -3,7 +3,7 @@ from brownie import chain
 
 
 def test_increase(
-    vault, strategy, gov, token, token_whale, borrow_token, borrow_whale, yvault, amount
+    vault, strategy, gov, token, token_whale, borrow_token, borrow_whale, amount
 ):
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(amount, {"from": token_whale})
@@ -13,9 +13,7 @@ def test_increase(
     strategy.harvest({"from": gov})
     assert vault.strategies(strategy).dict()["totalDebt"] == amount / 2
 
-    borrow_token.transfer(
-        yvault, 200 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
-    )
+    chain.sleep(60 * 60)
     tx = strategy.harvest({"from": gov})
     chain.sleep(60 * 60 * 24 * 2)
     chain.mine(1)

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.6.12;
+pragma solidity >=0.8.12;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -23,4 +23,6 @@ interface IVault is IERC20 {
     ) external returns (uint256);
 
     function availableDepositLimit() external view returns (uint256);
+
+    function governance() external view returns (address);
 }

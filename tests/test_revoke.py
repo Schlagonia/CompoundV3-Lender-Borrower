@@ -10,7 +10,7 @@ def test_revoke_strategy_from_vault(
     gov,
     RELATIVE_APPROX,
     comet,
-    yvault,
+    depositer,
     borrow_token,
     borrow_whale,
     amount

@@ -23,10 +23,23 @@ interface IBaseFee {
 interface IBaseFeeGlobal {
     function basefee_global() external view returns (uint256);
 }
+
+interface IDepositer{
+    function deposit() external;
+    function setStrategy() external;
+    function claimRewards() external;
+    function getRewardsOwed() external view returns (uint256);
+    function accruedCometBalance() external returns (uint256);
+    function getNetBorrowApr(uint256) external view returns (uint256);
+    function getNetRewardApr(uint256) external view returns(uint256);
+    function withdraw(uint256 _amount) external;
+    function baseToken() external view returns(IERC20);
+    function cometBalance() external view returns(uint256);
+}
  
 /********************
  *   Strategy to farm the rewards on Compound V3 by providing any of the possible collateral assets and then borrowing the base token
- *      The base token is then deposited into the corresponding Yearn vault and borrowing rewards are harvested.
+ *      The base token is then deposited back into compound through a seperate Depositer contract. Borrowing and supply rewards are harvested.
  *   Made by @Schlagonia
  *   https://github.com/Schlagonia/CompoundV3-Lender-Borrower
  *
@@ -35,13 +48,6 @@ interface IBaseFeeGlobal {
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
     using Address for address;
-
-    //Used for Comp apr calculations
-    uint64 internal constant DAYS_PER_YEAR = 365;
-    uint64 internal constant SECONDS_PER_DAY = 60 * 60 * 24;
-    uint64 internal constant SECONDS_PER_YEAR = 365 days;
-    uint64 internal BASE_MANTISSA;
-    uint64 internal BASE_INDEX_SCALE;
 
     // if set to true, the strategy will not try to repay debt by selling want
     bool public leaveDebtBehind;
@@ -55,7 +61,7 @@ contract Strategy is BaseStrategy {
         CometRewards(0x1B0e765F6224C21223AeA2af16c1C46E38885a40); 
     
     //The Yearn vault we will deposit the baseToken into
-    IVault public yVault;
+    IDepositer public depositer;
 
     //The reward Token
     address internal constant comp = 
@@ -82,7 +88,6 @@ contract Strategy is BaseStrategy {
     //Thresholds
     uint256 internal minThreshold;
     uint256 public minToSell;
-    uint256 public maxLoss;
     uint256 public maxGasPriceToTend;
     
     string internal strategyName;
@@ -91,10 +96,10 @@ contract Strategy is BaseStrategy {
         address _vault,
         address _comet,
         uint24 _ethToWantFee,
-        address _yVault,
+        address _depositer,
         string memory _strategyName
     ) BaseStrategy(_vault) {
-        _initializeThis(_comet, _ethToWantFee, _yVault, _strategyName);
+        _initializeThis(_comet, _ethToWantFee, _depositer, _strategyName);
     }
 
     // ----------------- PUBLIC VIEW FUNCTIONS -----------------
@@ -110,7 +115,6 @@ contract Strategy is BaseStrategy {
         uint16 _warningLTVMultiplier,
         uint256 _minToSell,
         bool _leaveDebtBehind,
-        uint256 _maxLoss,
         uint256 _maxGasPriceToTend
     ) external onlyAuthorized {
         require(
@@ -122,9 +126,6 @@ contract Strategy is BaseStrategy {
         minToSell = _minToSell;
         leaveDebtBehind = _leaveDebtBehind;
         maxGasPriceToTend = _maxGasPriceToTend;
-
-        require(_maxLoss <= 10_000);
-        maxLoss = _maxLoss;
     }
 
     function setFees(
@@ -153,7 +154,7 @@ contract Strategy is BaseStrategy {
     function _initializeThis(
         address _comet,
         uint24 _ethToWantFee, 
-        address _yVault,
+        address _depositer,
         string memory _strategyName
     ) internal {
         // Make sure we only initialize one time
@@ -163,21 +164,17 @@ contract Strategy is BaseStrategy {
         //Get the baseToken we wil borrow and the min
         baseToken = comet.baseToken();
         minThreshold = comet.baseBorrowMin();
-        yVault = IVault(_yVault);
 
-        require(baseToken == address(yVault.token()));
-
-        //For APR calculations
-        BASE_MANTISSA = uint64(comet.baseScale());
-        BASE_INDEX_SCALE = uint64(comet.baseIndexScale());
-
+        depositer = IDepositer(_depositer);
+        require(baseToken == address(depositer.baseToken()), "!base");
+   
         want.safeApprove(_comet, type(uint256).max);
         IERC20(baseToken).safeApprove(_comet, type(uint256).max);
-        IERC20(baseToken).safeApprove(_yVault, type(uint256).max);
+        IERC20(baseToken).safeApprove(_depositer, type(uint256).max);
         IERC20(comp).safeApprove(address(router), type(uint256).max);
         IERC20(baseToken).safeApprove(address(router), type(uint256).max);
 
-        //Default to .3% pool for comp/eth and to .05% pool for eth/usdc
+        //Default to .3% pool for comp/eth and to .05% pool for eth/baseToken
         _setFees(3000, 500, _ethToWantFee);
 
         strategyName = _strategyName;
@@ -190,11 +187,11 @@ contract Strategy is BaseStrategy {
         address _vault,
         address _comet,
         uint24 _ethToWantFee,
-        address _yVault,
+        address _depositer,
         string memory _strategyName
     ) external {
         _initialize(_vault,  msg.sender,  msg.sender,  msg.sender);
-        _initializeThis(_comet, _ethToWantFee, _yVault, _strategyName);
+        _initializeThis(_comet, _ethToWantFee, _depositer, _strategyName);
     }
 
     // ----------------- MAIN STRATEGY FUNCTIONS -----------------
@@ -222,9 +219,9 @@ contract Strategy is BaseStrategy {
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
 
         // claim rewards, even out baseToken deposits and borrows and sell remainder to want
-        //This will accrue the account as well so all future calls are accurate
+        //This will accrue this account as well as the depositer so all future calls are accurate
         _claimAndSellRewards();
-
+ 
         //base token owed should be 0 here but we count it just in case
         uint256 totalAssetsAfterProfit = 
             balanceOfWant() + 
@@ -254,7 +251,7 @@ contract Strategy is BaseStrategy {
         // We will rely on rewards to pay the interest and any returns from the vault are extra
         // Do not expect the vault return to be > the borrow cost, and harvest are speratic and can't
         // always be relied on to cover the borrowing costs
-        if(getBorrowApr(0) > getRewardAprForBorrowBase(0)) {
+        if(getNetBorrowApr(0) > getNetRewardApr(0)) {
             //Liquidate everything so not to report a loss
             liquidatePosition(balanceOfCollateral() + balanceOfWant());
             //Return since we dont want to do anything else
@@ -315,8 +312,8 @@ contract Strategy is BaseStrategy {
             //We want to make sure that the reward apr > borrow apr so we dont reprot a loss
             //Borrowing will cause the borrow apr to go up and the rewards apr to go down
             if(
-                getBorrowApr(_fromUsd(amountToBorrowUsd, baseToken)) > 
-                getRewardAprForBorrowBase(_fromUsd(amountToBorrowUsd, baseToken))
+                getNetBorrowApr(_fromUsd(amountToBorrowUsd, baseToken)) > 
+                getNetRewardApr(_fromUsd(amountToBorrowUsd, baseToken))
             ) {
                 //If we would push it over the limit dont borrow anything
                 amountToBorrowUsd = 0;
@@ -334,13 +331,13 @@ contract Strategy is BaseStrategy {
             // we repay debt to set it to targetLTV
             uint256 targetDebtUsd = targetLTV * collateralInUsd / 1e18;
             
-            //Withdraw the difference from the vault
-            _withdrawFromYVault(_fromUsd(debtInUsd - targetDebtUsd, baseToken)); // we withdraw from BaseToken vault
+            //Withdraw the difference from the Depositer
+            _withdrawFromDepositer(_fromUsd(debtInUsd - targetDebtUsd, baseToken)); // we withdraw from BaseToken vault
             _repayTokenDebt(); // we repay the BaseToken debt with compound
         }
 
         if (balanceOfBaseToken() > 0) {
-            yVault.deposit();
+            depositer.deposit();
         }
     }
 
@@ -370,7 +367,7 @@ contract Strategy is BaseStrategy {
         //Accrue account for accurate balances
         comet.accrueAccount(address(this));
         // We first repay whatever we need to repay to keep healthy ratios
-        _withdrawFromYVault(_calculateAmountToRepay(needed)); 
+        _withdrawFromDepositer(_calculateAmountToRepay(needed)); 
         // we repay the BaseToken debt with the amount withdrawn from the vault
         _repayTokenDebt();
         //Withdraw as much as we can up to the amount needed while maintaning a health ltv
@@ -381,13 +378,13 @@ contract Strategy is BaseStrategy {
         if (
             _amountNeeded > balance &&
             balanceOfDebt() > 0 && // still some debt remaining
-            balanceOfBaseToken() + balanceOfVault() == 0 && // but no capital to repay
+            balanceOfBaseToken() + balanceOfDepositer() == 0 && // but no capital to repay
             !leaveDebtBehind // if set to true, the strategy will not try to repay debt by selling want
         ) {
-            // using this part of code will result in losses but it is necessary to unlock full collateral in case of wind down
+            // using this part of code may result in losses but it is necessary to unlock full collateral in case of wind down
             //This should only occur when depleting the strategy so we want to swap the full amount of our debt
-            // we buy BaseToken with Want
-            _buyBaseTokenWithWant(balanceOfDebt());
+            //we buy BaseToken first with available rewards then with Want
+            _buyBaseToken(balanceOfDebt());
 
             // we repay debt to actually unlock collateral
             // after this, balanceOfDebt should be 0
@@ -407,8 +404,8 @@ contract Strategy is BaseStrategy {
     }
 
     function prepareMigration(address _newStrategy) internal override {
-        //Withraw from vault first to know exactly how much we can pay back
-        yVault.withdraw(yVault.balanceOf(address(this)), address(this), maxLoss);
+        //Withraw from depositer first to know exactly how much we can pay back
+        depositer.withdraw(depositer.accruedCometBalance());
 
         //Accrue account for accurate balances
         comet.accrueAccount(address(this));
@@ -429,7 +426,7 @@ contract Strategy is BaseStrategy {
 
     function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
         if(super.harvestTrigger(callCostInWei)) {
-            isBaseFeeAcceptable();
+            return isBaseFeeAcceptable();
         }
     }
 
@@ -463,7 +460,7 @@ contract Strategy is BaseStrategy {
         
         if (// WE NEED TO TAKE ON MORE DEBT (we need a 10p.p (1000bps) difference)
             (currentLTV < targetLTV && targetLTV - currentLTV > 1e17) || 
-                (getBorrowApr(0) > getRewardAprForBorrowBase(0)) // UNHEALTHY BORROWING COSTS
+                (getNetBorrowApr(0) > getNetRewardApr(0)) // UNHEALTHY BORROWING COSTS
         ) {
             return isBaseFeeAcceptable();
         }
@@ -478,21 +475,26 @@ contract Strategy is BaseStrategy {
 
     // ----------------- INTERNAL FUNCTIONS SUPPORT -----------------
 
-    function _withdrawFromYVault(uint256 _amountBT) internal {
-        if (_amountBT == 0) return;
-
-        // no need to check allowance bc the contract == token
+    function _withdrawFromDepositer(uint256 _amountBT) internal {
         uint256 balancePrior = balanceOfBaseToken();
         //Only withdraw what we dont already have free
         _amountBT = balancePrior >= _amountBT ? 0 : _amountBT - balancePrior;
-        uint256 sharesToWithdraw =
-            Math.min(
-                _baseTokenToYShares(_amountBT),
-                yVault.balanceOf(address(this))
-            );
-        if (sharesToWithdraw == 0) return;
+        if (_amountBT == 0) return;
 
-        yVault.withdraw(sharesToWithdraw, address(this), maxLoss);
+        //Make sure we have enough balance. This accrues the account first.
+        _amountBT =
+            Math.min(
+                _amountBT,
+                depositer.accruedCometBalance()
+            );
+        //need to check liquidity of the comet
+        _amountBT =
+            Math.min(
+                _amountBT,
+                IERC20(baseToken).balanceOf(address(comet))
+            );
+
+        depositer.withdraw(_amountBT);
     }
 
     /*
@@ -560,13 +562,13 @@ contract Strategy is BaseStrategy {
     function _toUsd(uint256 _amount, address _token) internal view returns(uint256) {
         if(_amount == 0) return _amount;
         //usd price is returned as 1e8
-        return _amount * getCompoundPrice(getPriceFeedAddress(_token)) / (10 ** IERC20Extended(_token).decimals());
+        return _amount * getCompoundPrice(_token) / (10 ** IERC20Extended(_token).decimals());
     }
 
     //Returns the _amount of usd (1e8) in terms of want
     function _fromUsd(uint256 _amount, address _token) internal view returns(uint256) {
         if(_amount == 0) return _amount;
-        return _amount * (10 ** IERC20Extended(_token).decimals()) / getCompoundPrice(getPriceFeedAddress(_token));
+        return _amount * (10 ** IERC20Extended(_token).decimals()) / getCompoundPrice(_token);
     }
 
     function balanceOfWant() public view returns (uint256) {
@@ -581,8 +583,8 @@ contract Strategy is BaseStrategy {
         return IERC20(baseToken).balanceOf(address(this));
     }
 
-    function balanceOfVault() public view returns(uint256) {
-        return yVault.balanceOf(address(this)) * yVault.pricePerShare() / (10**yVault.decimals());
+    function balanceOfDepositer() public view returns(uint256) {
+        return depositer.cometBalance();
     }
 
     function balanceOfDebt() public view returns (uint256) {
@@ -592,7 +594,7 @@ contract Strategy is BaseStrategy {
     //Returns the negative position of base token. i.e. borrowed - supplied
     //if supplied is higher it will return 0
     function baseTokenOwedBalance() public view returns(uint256) {
-        uint256 supplied = balanceOfVault();
+        uint256 supplied = balanceOfDepositer();
         uint256 borrowed = balanceOfDebt();
         uint256 loose = balanceOfBaseToken();
         
@@ -607,40 +609,17 @@ contract Strategy is BaseStrategy {
     }
 
     function rewardsInWant() public view returns(uint256) {
-        return _fromUsd(_toUsd(getRewardsOwed(), comp), address(want)) * 9_000 / MAX_BPS;
+        return _fromUsd(_toUsd(depositer.getRewardsOwed(), comp), address(want)) * 9_000 / MAX_BPS;
     }
 
-    function _baseTokenToYShares(uint256 amount)
-        internal
-        view
-        returns (uint256)
-    {
-        return amount * (10**yVault.decimals()) / yVault.pricePerShare();
+    //We put teh logic for these functions in the depositer contract to save byte code in the main strategy
+
+    function getNetBorrowApr(uint256 newAmount) public view returns(uint256 netApr) {
+        depositer.getNetRewardApr(newAmount);
     }
 
-    /*
-    * Get the current borrow APR in Compound III
-    */
-    function getBorrowApr(uint256 newAmount) internal view returns (uint256) {
-
-        return comet.getBorrowRate(
-                    (comet.totalBorrow() + newAmount) * 1e18 / comet.totalSupply() //New utilization
-                        ) * SECONDS_PER_YEAR;  
-    }
-
-    /*
-    * Get the current reward for borrowing APR in Compound III
-    * @param rewardTokenPriceFeed The address of the reward token (e.g. COMP) price feed
-    * @return The reward APR in USD as a decimal scaled up by 1e18
-    */
-    function getRewardAprForBorrowBase(uint256 newAmount) internal view returns (uint256) {
-        //borrowBaseRewardApr = (rewardTokenPriceInUsd * rewardToBorrowersPerDay / (baseTokenTotalBorrow * baseTokenPriceInUsd)) * DAYS_PER_YEAR;
-        uint256 rewardToBorrowersPerDay =  comet.baseTrackingBorrowSpeed() * SECONDS_PER_DAY * BASE_INDEX_SCALE / BASE_MANTISSA;
-        return (getCompoundPrice(getPriceFeedAddress(comp)) * 
-                    rewardToBorrowersPerDay / 
-                        ((comet.totalBorrow() + newAmount) * 
-                            getCompoundPrice(comet.baseTokenPriceFeed()))) * 
-                                DAYS_PER_YEAR;
+    function getNetRewardApr(uint256 newAmount) public view returns (uint256) {
+        return depositer.getNetRewardApr(newAmount);
     }
 
     /*
@@ -661,13 +640,8 @@ contract Strategy is BaseStrategy {
     /*
     * Get the current price of an asset from the protocol's persepctive
     */
-    function getCompoundPrice(address singleAssetPriceFeed) internal view returns (uint256) {
-        return comet.getPrice(singleAssetPriceFeed);
-    }
-
-    function delegatedAssets() external view override returns (uint256) {
-        // returns total debt borrowed in want (which is the delegatedAssets)
-        return _fromUsd(_toUsd(balanceOfVault(), baseToken), address(want));
+    function getCompoundPrice(address asset) internal view returns (uint256) {
+        return comet.getPrice(getPriceFeedAddress(asset));
     }
 
     //External function used to easisly calculate the current LTV of the strat
@@ -695,28 +669,18 @@ contract Strategy is BaseStrategy {
 
     // ----------------- HARVEST / TOKEN CONVERSIONS -----------------
 
-    /*
-    * Gets the amount of reward tokens due to this contract address
-    */
-    function getRewardsOwed() public view returns (uint256) {
-        CometStructs.RewardConfig memory config = rewardsContract.rewardConfig(address(comet));
-        uint256 accrued = comet.baseTrackingAccrued(address(this));
-        if (config.shouldUpscale) {
-            accrued *= config.rescaleFactor;
-        } else {
-            accrued /= config.rescaleFactor;
-        }
-        uint256 claimed = rewardsContract.rewardsClaimed(address(comet), address(this));
-
-        return accrued > claimed ? accrued - claimed : 0;
+    function claimRewards() external onlyKeepers {
+        _claimRewards();
     }
 
-    function claimRewards() external onlyKeepers {
+    function _claimRewards() internal {
         rewardsContract.claim(address(comet), address(this), true);
+        //Pull rewards from depositer even if not incentivised to accrue the account
+        depositer.claimRewards();   
     }
 
     function _claimAndSellRewards() internal {
-        rewardsContract.claim(address(comet), address(this), true);
+        _claimRewards();
 
         uint256 compBalance = IERC20(comp).balanceOf(address(this));
 
@@ -735,13 +699,6 @@ contract Strategy is BaseStrategy {
                 //if not swap everything we have
                 _swapTo(comp, baseToken, compBalance);
             }
-        } else if(balanceOfVault() > balanceOfDebt()) {
-            //if vault balance is > owed pull those funds and swap to want
-            baseNeeded = balanceOfVault() - balanceOfDebt();
-            //withdraw the diff from the vault
-            _withdrawFromYVault(baseNeeded);
-            //Swap to want, check in case of any loss from the vault withdraw
-            _swapTo(baseToken, address(want), Math.min(baseNeeded, balanceOfBaseToken()));
         }
         
         compBalance = IERC20(comp).balanceOf(address(this));
@@ -751,17 +708,26 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function _buyBaseTokenWithWant(uint256 _amount) internal {
-        //Need to account for both slippage and diff in the oracle price.
-        //Should be only swapping very small amounts so its just to make sure there is no massive sandwhich
-        uint256 maxWantBalance = _fromUsd(_toUsd(_amount, baseToken), address(want)) * 10_500 / MAX_BPS;
-        //Under 10 can cause rounding errors from token conversions, no need to swap that small amount  
-        if (maxWantBalance <= 10) return;
+    //Thi should only ever get called when withdrawing all funds from the strategy if there is debt left over.
+    //It will first try and sell rewards for the needed amount of base token. then will swap want
+    function _buyBaseToken(uint256 _amount) internal {
+        //We should be able to get the needed amount from rewards tokens. 
+        //We first try that before swapping want and reporting losses.
+        _claimAndSellRewards();
 
-        //This should rarely if ever happen so we approve only what is needed
-        IERC20(address(want)).safeApprove(address(router), 0);
-        IERC20(address(want)).safeApprove(address(router), maxWantBalance);
-        _swapFrom(address(want), baseToken, _amount, maxWantBalance);   
+        //Check if our debt balance is still greater than our base token balance
+        if(baseTokenOwedBalance() > 0) {
+            //Need to account for both slippage and diff in the oracle price.
+            //Should be only swapping very small amounts so its just to make sure there is no massive sandwhich
+            uint256 maxWantBalance = _fromUsd(_toUsd(baseTokenOwedBalance(), baseToken), address(want)) * 10_500 / MAX_BPS;
+            //Under 10 can cause rounding errors from token conversions, no need to swap that small amount  
+            if (maxWantBalance <= 10) return;
+
+            //This should rarely if ever happen so we approve only what is needed
+            IERC20(address(want)).safeApprove(address(router), 0);
+            IERC20(address(want)).safeApprove(address(router), maxWantBalance);
+            _swapFrom(address(want), baseToken, _amount, maxWantBalance);   
+        }
     }
 
     function _swapTo(address _from, address _to, uint256 _amountFrom) internal {
@@ -860,9 +826,9 @@ contract Strategy is BaseStrategy {
     {}
     
     //Manual function available to management to withdraw from vault and repay debt
-    function manualWithdrawAndRepayDebt(uint256 _amount, uint256 _maxLoss) external onlyAuthorized {
+    function manualWithdrawAndRepayDebt(uint256 _amount) external onlyAuthorized {
         if(_amount > 0) {
-            yVault.withdraw(_amount, address(this), _maxLoss);
+            depositer.withdraw(_amount);
         }
         _repayTokenDebt();
     }

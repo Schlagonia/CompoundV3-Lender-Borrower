@@ -164,7 +164,10 @@ def weth_amout(user, weth):
     user.transfer(weth, weth_amout)
     yield weth_amout
 
-
+@pytest.fixture
+def rewardsContract():
+    yield Contract("0x1B0e765F6224C21223AeA2af16c1C46E38885a40")
+    
 @pytest.fixture
 def registry():
     yield Contract("0x50c1a2eA0a861A967D9d0FFE2AE4012c2E053804")
@@ -199,11 +202,14 @@ def weth_vault(pm, gov, rewards, guardian, management, weth):
 
 @pytest.fixture
 def strategy(vault, Strategy, gov, cloner):
-    strategy = Strategy.at(cloner.original())
+    strategy = Strategy.at(cloner.originalStrategy())
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     chain.mine()
     yield strategy
 
+@pytest.fixture
+def depositer(cloner, Depositer):
+    yield Depositer.at(cloner.originalDepositer())
 
 @pytest.fixture
 def RELATIVE_APPROX():
@@ -215,7 +221,6 @@ def cloner(
     strategist,
     vault,
     CompV3LenderBorrowerCloner,
-    yvault,
     comet,
     ethToWantFee,
     token,
@@ -226,7 +231,6 @@ def cloner(
         vault,
         comet,
         ethToWantFee,
-        yvault,
         f"Strategy{token.symbol()}Lender{baseToken.symbol()}Borrower",
     )
 

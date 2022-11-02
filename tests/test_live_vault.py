@@ -3,7 +3,7 @@ from brownie import chain, Contract
 
 
 def test_live_vault(live_vault, strategy, gov, token, token_whale, amount, comet, cloner,
-    strategist, rewards, keeper, ethToWantFee, yvault, baseToken
+    strategist, rewards, keeper, ethToWantFee, depositer, baseToken
 ):
     vault = live_vault
     clone_tx = cloner.cloneCompV3LenderBorrower(
@@ -13,12 +13,11 @@ def test_live_vault(live_vault, strategy, gov, token, token_whale, amount, comet
         keeper,
         comet,
         ethToWantFee,
-        yvault,
         "StrategyCompLender" + token.symbol() + "Borrower" + baseToken.symbol(),
     )
 
     cloned_strategy = Contract.from_abi(
-        "Strategy", clone_tx.events["Cloned"]["clone"], strategy.abi
+        "Strategy", clone_tx.return_value["newStrategy"], strategy.abi
     )
     current_dr = vault.debtRatio()
     vault.addStrategy(cloned_strategy, 10_000 - current_dr, 0, 2 ** 256 - 1, 0, {"from": gov})

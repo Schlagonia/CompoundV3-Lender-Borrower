@@ -2,37 +2,43 @@
 pragma solidity >=0.8.12;
 pragma experimental ABIEncoderV2;
 
+import "./Depositer.sol";
 import "./Strategy.sol";
 
 contract CompV3LenderBorrowerCloner {
-    address public immutable original;
+    address public immutable originalDepositer;
+    address public immutable originalStrategy;
 
-    event Cloned(address indexed clone);
-    event Deployed(address indexed original);
+    event Cloned(address indexed depositer, address indexed strategy);
+    event Deployed(address indexed depositer, address indexed strategy);
 
     constructor(
         address _vault,
         address _comet,
         uint24 _ethToWantFee,
-        address _yVault,
         string memory _strategyName
     ) {
-        Strategy _original = new Strategy(_vault, _comet, _ethToWantFee, _yVault, _strategyName);
-        emit Deployed(address(_original));
+        Depositer _depositer = new Depositer(_comet);
+        Strategy _strategy = new Strategy(_vault, _comet, _ethToWantFee, address(_depositer), _strategyName);
 
-        original = address(_original);
-        Strategy(_original).setStrategyParams(
+        originalDepositer = address(_depositer);
+        originalStrategy = address(_strategy);
+
+        emit Deployed(originalDepositer, originalStrategy);
+
+        _depositer.setStrategy(originalStrategy);
+
+        Strategy(_strategy).setStrategyParams(
             7_000, // targetLTVMultiplier (default: 7_000)
             8_000, // warningLTVMultiplier default: 8_000
             1e10, // min rewards to sell
             false, // leave debt behind (default: false)
-            1, // maxLoss (default: 1)
             60 * 1e9 // max base fee to perform non-emergency tends (default: 60 gwei)
         );
 
-        Strategy(_original).setRewards(msg.sender);
-        Strategy(_original).setKeeper(msg.sender);
-        Strategy(_original).setStrategist(msg.sender);
+        Strategy(_strategy).setRewards(msg.sender);
+        Strategy(_strategy).setKeeper(msg.sender);
+        Strategy(_strategy).setStrategist(msg.sender);
     }
 
     function name() external pure returns (string memory) {
@@ -46,11 +52,11 @@ contract CompV3LenderBorrowerCloner {
         address _keeper,
         address _comet,
         uint24 _ethToWantFee,
-        address _yVault,
         string memory _strategyName
-    ) external returns (address newStrategy) {
+    ) external returns (address newDepositer, address newStrategy) {
+        newDepositer = Depositer(originalDepositer).cloneDepositer(_comet);
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
-        bytes20 addressBytes = bytes20(original);
+        bytes20 addressBytes = bytes20(originalStrategy);
         assembly {
             // EIP-1167 bytecode
             let clone_code := mload(0x40)
@@ -66,14 +72,15 @@ contract CompV3LenderBorrowerCloner {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        Strategy(newStrategy).initialize(_vault, _comet, _ethToWantFee, _yVault, _strategyName);
+        Strategy(newStrategy).initialize(_vault, _comet, _ethToWantFee, newDepositer, _strategyName);
+
+        Depositer(newDepositer).setStrategy(newStrategy);
         
         Strategy(newStrategy).setStrategyParams(
             7_000, // targetLTVMultiplier (default: 7_000)
             8_000, // warningLTVMultiplier default: 8_000
             1e10, // min rewards to sell
             false, // leave debt behind (default: false)
-            1, // maxLoss (default: 1)
             60 * 1e9 // max base fee to perform non-emergency tends (default: 60 gwei)
         );
 
@@ -81,6 +88,6 @@ contract CompV3LenderBorrowerCloner {
         Strategy(newStrategy).setRewards(_rewards);
         Strategy(newStrategy).setStrategist(_strategist);
 
-        emit Cloned(newStrategy);
+        emit Cloned(newDepositer, newStrategy);
     }
 }
