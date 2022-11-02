@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity >=0.8.12;
+pragma solidity >=0.8.15;
 pragma experimental ABIEncoderV2;
 
 import {IVault} from "./interfaces/IVault.sol";
@@ -26,7 +26,7 @@ contract Depositer {
     using Address for address;
 
     //Used for cloning
-    bool original = true;
+    bool public original = true;
 
     //Used for Comp apr calculations
     uint64 internal constant DAYS_PER_YEAR = 365;
@@ -130,7 +130,7 @@ contract Depositer {
         return comet.balanceOf(address(this));
     }
 
-    //Non-view function to accrue account for most accurate accounting
+    //Non-view function to accrue account for the most accurate accounting
     function accruedCometBalance() public returns(uint256) {
         comet.accrueAccount(address(this));
         return comet.balanceOf(address(this));

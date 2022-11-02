@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity >=0.8.12;
+pragma solidity >=0.8.15;
 pragma experimental ABIEncoderV2;
 
 import {IVault} from "./interfaces/IVault.sol";
@@ -60,7 +60,7 @@ contract Strategy is BaseStrategy {
     CometRewards public constant rewardsContract = 
         CometRewards(0x1B0e765F6224C21223AeA2af16c1C46E38885a40); 
     
-    //The Yearn vault we will deposit the baseToken into
+    //The Contract that will deposit the baseToken back into Compound
     IDepositer public depositer;
 
     //The reward Token
@@ -424,12 +424,6 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
-        if(super.harvestTrigger(callCostInWei)) {
-            return isBaseFeeAcceptable();
-        }
-    }
-
     function tendTrigger(uint256 callCost) public view override returns (bool) {
         if (harvestTrigger(callCost)) {
             //harvest takes priority
@@ -466,11 +460,6 @@ contract Strategy is BaseStrategy {
         }
 
         return false;
-    }
-
-    function isBaseFeeAcceptable() internal view returns(bool) {
-        return IBaseFee(0xb5e1CAcB567d98faaDB60a1fD4820720141f064F)
-                    .isCurrentBaseFeeAcceptable();
     }
 
     // ----------------- INTERNAL FUNCTIONS SUPPORT -----------------
@@ -516,8 +505,7 @@ contract Strategy is BaseStrategy {
     }
 
     function _repayTokenDebt() internal {
-        // we cannot pay more than loose balance
-        // we do pay more than we owe
+        //we cannot pay more than loose balance or more than we owe
         _supply(baseToken, Math.min(balanceOfBaseToken(), balanceOfDebt()));
     }
 
@@ -562,13 +550,17 @@ contract Strategy is BaseStrategy {
     function _toUsd(uint256 _amount, address _token) internal view returns(uint256) {
         if(_amount == 0) return _amount;
         //usd price is returned as 1e8
-        return _amount * getCompoundPrice(_token) / (10 ** IERC20Extended(_token).decimals());
+        unchecked {
+            return _amount * getCompoundPrice(_token) / (10 ** IERC20Extended(_token).decimals());
+        }
     }
 
     //Returns the _amount of usd (1e8) in terms of want
     function _fromUsd(uint256 _amount, address _token) internal view returns(uint256) {
         if(_amount == 0) return _amount;
-        return _amount * (10 ** IERC20Extended(_token).decimals()) / getCompoundPrice(_token);
+        unchecked {
+            return _amount * (10 ** IERC20Extended(_token).decimals()) / getCompoundPrice(_token);
+        }
     }
 
     function balanceOfWant() public view returns (uint256) {
@@ -601,7 +593,9 @@ contract Strategy is BaseStrategy {
         //If they are the same or supply > debt return 0
         if(supplied + loose >= borrowed) return 0;
 
-        return borrowed - supplied - loose;
+        unchecked {
+            return borrowed - supplied - loose;
+        }
     }
 
     function baseTokenOwedInWant() public view returns(uint256) {
@@ -646,7 +640,9 @@ contract Strategy is BaseStrategy {
 
     //External function used to easisly calculate the current LTV of the strat
     function getCurrentLTV() external view returns(uint256) {
-        return _toUsd(balanceOfDebt(), baseToken) * 1e18 / _toUsd(balanceOfCollateral(), address(want));
+        unchecked {
+            return _toUsd(balanceOfDebt(), baseToken) * 1e18 / _toUsd(balanceOfCollateral(), address(want));
+        }
     }
 
     function _getTargetLTV()
@@ -654,8 +650,10 @@ contract Strategy is BaseStrategy {
         view
         returns (uint256)
     {
-        return
-            getLiquidateCollateralFactor() * targetLTVMultiplier / MAX_BPS;
+        unchecked {
+            return
+                getLiquidateCollateralFactor() * targetLTVMultiplier / MAX_BPS;
+        }
     }
 
     function _getWarningLTV()
@@ -663,8 +661,10 @@ contract Strategy is BaseStrategy {
         view
         returns (uint256)
     {
-        return
-            getLiquidateCollateralFactor() * warningLTVMultiplier / MAX_BPS;
+        unchecked{
+            return
+                getLiquidateCollateralFactor() * warningLTVMultiplier / MAX_BPS;
+        }
     }
 
     // ----------------- HARVEST / TOKEN CONVERSIONS -----------------
