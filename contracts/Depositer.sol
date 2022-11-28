@@ -166,7 +166,7 @@ contract Depositer {
 
     // ----------------- COMET VIEW FUNCTIONS -----------------
 
-    //We put these in the depositer contract to save byte code in the main strategy
+    // We put these in the depositer contract to save byte code in the main strategy \\
 
     /*
     * Gets the amount of reward tokens due to this contract and the base strategy
