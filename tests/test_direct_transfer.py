@@ -40,6 +40,7 @@ def test_borrow_token_transfer_sends_to_depositer(
 
     amount = 1_000 * (10 ** borrow_token.decimals())
     borrow_token.transfer(strategy, amount, {"from": borrow_whale})
+    chain.sleep(1)
 
     strategy.harvest({"from": gov})
     assert borrow_token.balanceOf(strategy) == 0
