@@ -49,4 +49,3 @@ def test_live_vault(live_vault, strategy, gov, token, token_whale, amount, comet
     # we are currently in a profitable scenario so there is no loss
     print(f"diff {prev_balance-token.balanceOf(token_whale)}")
     assert token.balanceOf(token_whale) - prev_balance > 0
-

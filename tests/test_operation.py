@@ -69,9 +69,9 @@ def test_profitable_harvest(
     chain.sleep(50 * 24 * 3600)
     chain.mine(1)
 
-    strategy.harvest({"from": strategist})  # to claim and start cooldown
+    strategy.harvest({"from": strategist})
 
-    chain.sleep(10 * 24 * 3600 + 1)  # sleep during cooldown
+    chain.sleep(10 * 24 * 3600 + 1)
     chain.mine(1)
 
     before_pps = vault.pricePerShare()
@@ -311,3 +311,14 @@ def test_depositer_fucntions(
 
     assert borrow_token.balanceOf(gov) > before_balance
     assert depositer.cometBalance() == 0
+
+def test_apr(
+    strategy
+):
+    borrow = strategy.getNetBorrowApr(0)
+    reward = strategy.getNetRewardApr(0)
+
+    print(f"Net borrow apr is {borrow/1e18}")
+    print(f"Net reward apr is {reward/1e18}")
+
+    assert reward > borrow
