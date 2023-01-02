@@ -38,6 +38,7 @@ def test_borrow_token_transfer_sends_to_depositer(
     chain.sleep(1)
     strategy.harvest({"from": gov})
 
+
     amount = 1_000 * (10 ** borrow_token.decimals())
     borrow_token.transfer(strategy, amount, {"from": borrow_whale})
     chain.sleep(1)
@@ -58,6 +59,7 @@ def test_borrow_token_transfer_increments(
 
     amount = 1_000 * (10 ** borrow_token.decimals())
     borrow_token.transfer(strategy, amount, {"from": borrow_whale})
+    chain.sleep(1)
 
     strategy.harvest({"from": gov})
     assert depositer.cometBalance() > initialBalance
