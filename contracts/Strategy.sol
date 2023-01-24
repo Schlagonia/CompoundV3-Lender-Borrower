@@ -49,7 +49,7 @@ contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
     using Address for address;
 
-    // if set to true, the strategy will not try to repay debt by selling want
+    // if set to true, the strategy will not try to repay debt by selling rewards or want
     bool public leaveDebtBehind;
 
     //This is the address of the main V3 pool
@@ -218,7 +218,7 @@ contract Strategy is BaseStrategy {
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
 
         // claim rewards, even out baseToken deposits and borrows and sell remainder to want
-        //This will accrue this account as well as the depositer so all future calls are accurate
+        // This will accrue this account as well as the depositer so all future calls are accurate
         _claimAndSellRewards();
  
         //base token owed should be 0 here but we count it just in case
@@ -243,14 +243,16 @@ contract Strategy is BaseStrategy {
     }
 
     function adjustPosition(uint256 _debtOutstanding) internal override {
-        //Accrue account for accurate balances for tend calls
-        comet.accrueAccount(address(this));
+        // cache comet for all future calls
+        Comet _comet = comet;
+        // Accrue account for accurate balances for tend calls
+        _comet.accrueAccount(address(this));
 
         // If the cost to borrow > rewards rate we will pull out all funds to not report a loss
         if(getNetBorrowApr(0) > getNetRewardApr(0)) {
-            //Liquidate everything so not to report a loss
+            // Liquidate everything so not to report a loss
             liquidatePosition(balanceOfCollateral() + balanceOfWant());
-            //Return since we dont want to do anything else
+            // Return since we dont want to do anything else
             return;
         }
 
@@ -264,7 +266,7 @@ contract Strategy is BaseStrategy {
                 Math.min(
                     wantBalance - _debtOutstanding, 
                     //Check supply cap wont be reached for want
-                    uint256(comet.getAssetInfoByAddress(_want).supplyCap) - uint256(comet.totalsCollateral(_want).totalSupplyAsset)
+                    uint256(_comet.getAssetInfoByAddress(_want).supplyCap) - uint256(_comet.totalsCollateral(_want).totalSupplyAsset)
             ));
         }
 
@@ -302,8 +304,8 @@ contract Strategy is BaseStrategy {
             // convert to BaseToken
             uint256 amountToBorrowBT =
                 _fromUsd(amountToBorrowUsd, _baseToken);
-            uint256 currentProtocolDebt = comet.totalBorrow();
-            uint256 maxProtocolDebt = comet.totalSupply();
+            uint256 currentProtocolDebt = _comet.totalBorrow();
+            uint256 maxProtocolDebt = _comet.totalSupply();
             // cap the amount of debt we are taking according to what is available from Compound
             if (currentProtocolDebt + amountToBorrowBT > maxProtocolDebt) {
                 // Can't underflow because it's checked in the previous if condition
@@ -344,7 +346,7 @@ contract Strategy is BaseStrategy {
         override
         returns (uint256 _amountFreed)
     {
-        (_amountFreed, ) = liquidatePosition(estimatedTotalAssets());
+        (_amountFreed, ) = liquidatePosition(balanceOfCollateral() + balanceOfWant());
     }
 
     function liquidatePosition(uint256 _amountNeeded)
@@ -374,7 +376,7 @@ contract Strategy is BaseStrategy {
         balance = balanceOfWant();
         // we check if we withdrew less than expected AND should harvest or buy BaseToken with want (realising losses)
         if (
-            _amountNeeded > balance &&
+            _amountNeeded > balance && // if we didn't get enough
             balanceOfDebt() > 0 && // still some debt remaining
             balanceOfBaseToken() + balanceOfDepositer() == 0 && // but no capital to repay
             !leaveDebtBehind // if set to true, the strategy will not try to repay debt by selling want
@@ -531,10 +533,11 @@ contract Strategy is BaseStrategy {
         returns (uint256)
     {
         if (amount == 0) return 0;
-        if(amount >= balanceOfCollateral()) return balanceOfDebt();
+        uint256 collateral = balanceOfCollateral();
+        if(amount >= collateral) return balanceOfDebt();
         
         // we check if the collateral that we are withdrawing leaves us in a risky range, we then take action
-        uint256 newCollateralUsd = _toUsd(balanceOfCollateral() - amount, address(want));
+        uint256 newCollateralUsd = _toUsd(collateral - amount, address(want));
 
         uint256 targetDebtUsd = newCollateralUsd * _getTargetLTV() / 1e18;
         uint256 targetDebt = _fromUsd(targetDebtUsd, baseToken);
@@ -681,29 +684,32 @@ contract Strategy is BaseStrategy {
     function _claimAndSellRewards() internal {
         _claimRewards();
 
-        uint256 compBalance = IERC20(comp).balanceOf(address(this));
+        address _comp = comp;
+
+        uint256 compBalance = IERC20(_comp).balanceOf(address(this));
 
         if(compBalance <= minToSell) return;
 
         uint256 baseNeeded = baseTokenOwedBalance();
 
         if(baseNeeded > 0) {
+            address _baseToken = baseToken;
             //We estimate how much we will need in order to get the amount of base
             //Accounts for slippage and diff from oracle price, just to assure no horrible sandwhich
-            uint256 maxComp = _fromUsd(_toUsd(baseNeeded, baseToken), comp) * 10_500 / MAX_BPS;
+            uint256 maxComp = _fromUsd(_toUsd(baseNeeded, _baseToken), _comp) * 10_500 / MAX_BPS;
             if(maxComp < compBalance) {
                 //If we have enough swap and exact amount out
-                _swapFrom(comp, baseToken, baseNeeded, maxComp);
+                _swapFrom(_comp, _baseToken, baseNeeded, maxComp);
             } else {
                 //if not swap everything we have
-                _swapTo(comp, baseToken, compBalance);
+                _swapTo(_comp, _baseToken, compBalance);
             }
         }
         
-        compBalance = IERC20(comp).balanceOf(address(this));
+        compBalance = IERC20(_comp).balanceOf(address(this));
         //Anything over the amount to cover debt is profit
         if(compBalance > minToSell) {
-            _swapTo(comp, address(want), compBalance);
+            _swapTo(_comp, address(want), compBalance);
         }
     }
 

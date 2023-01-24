@@ -138,20 +138,23 @@ contract Depositer {
 
     function withdraw(uint256 _amount) external onlyStrategy {
         if (_amount == 0) return;
+        IERC20 _baseToken = baseToken;
 
-        comet.withdraw(address(baseToken), _amount);
+        comet.withdraw(address(_baseToken), _amount);
 
-        uint256 balance = baseToken.balanceOf(address(this));
+        uint256 balance = _baseToken.balanceOf(address(this));
         require(balance >= _amount, "!bal");
-        baseToken.transfer(address(strategy), balance);
+        _baseToken.transfer(address(strategy), balance);
     }
 
     function deposit() external onlyStrategy {
-        uint256 _amount = baseToken.balanceOf(address(strategy));
+        IERC20 _baseToken = baseToken;
+        // msg.sender has been checked to be strategy
+        uint256 _amount = _baseToken.balanceOf(msg.sender);
         if (_amount == 0) return;
         
-        baseToken.transferFrom(msg.sender, address(this), _amount);
-        comet.supply(address(baseToken), _amount);
+        _baseToken.transferFrom(msg.sender, address(this), _amount);
+        comet.supply(address(_baseToken), _amount);
     }
 
     function claimRewards() external onlyStrategy {
@@ -197,9 +200,10 @@ contract Depositer {
     * Get the current supply APR in Compound III
     */
     function getSupplyApr(uint256 newAmount) internal view returns (uint) {
+        Comet _comet = comet;
         unchecked {   
-            return comet.getSupplyRate(
-                    (comet.totalBorrow() + newAmount) * 1e18 / (comet.totalSupply() + newAmount) 
+            return _comet.getSupplyRate(
+                    (_comet.totalBorrow() + newAmount) * 1e18 / (_comet.totalSupply() + newAmount) 
                         ) * SECONDS_PER_YEAR;
         }
     }
@@ -208,9 +212,10 @@ contract Depositer {
     * Get the current borrow APR in Compound III
     */
     function getBorrowApr(uint256 newAmount) internal view returns (uint256) {
+        Comet _comet = comet;
         unchecked {
-            return comet.getBorrowRate(
-                     (comet.totalBorrow() + newAmount) * 1e18 / (comet.totalSupply() + newAmount) //New utilization
+            return _comet.getBorrowRate(
+                     (_comet.totalBorrow() + newAmount) * 1e18 / (_comet.totalSupply() + newAmount) //New utilization
                             ) * SECONDS_PER_YEAR;  
         }
     }
