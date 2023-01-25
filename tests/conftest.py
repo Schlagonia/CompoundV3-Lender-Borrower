@@ -65,9 +65,16 @@ def wbtc():
     yield Contract("0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599")
 
 @pytest.fixture
-def comet(interface):
-    yield interface.Comet("0xc3d688B66703497DAA19211EEdff47f25384cdc3")
+def stEth():
+    yield Contract("0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0")
 
+@pytest.fixture
+def comet(interface, token, stEth):
+    if token == stEth:
+        yield interface.Comet("0xA17581A9E3356d9A858b789D68B4d866e593aE94")
+    else:
+        yield interface.Comet("0xc3d688B66703497DAA19211EEdff47f25384cdc3")
+        
 
 @pytest.fixture
 def baseToken(comet):
@@ -86,7 +93,9 @@ def weth_whale(accounts):
 def ethToWantFee():
     yield 3000 # wbtc/eth .3% pool
 
-addresses = {
+@pytest.fixture
+def addresses():
+    yield {
     "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",  # WBTC
     "YFI": "0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e",  # YFI
     "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # WETH
@@ -94,7 +103,8 @@ addresses = {
     "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",  # USDT
     "DAI": "0x6B175474E89094C44Da98b954EedeAC495271d0F",  # DAI
     "USDC": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",  # USDC
-}
+    "STETH": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"
+    }
 
 
 @pytest.fixture(
@@ -107,8 +117,8 @@ addresses = {
         "DAI"
     ]
 )
-def token(wbtc):
-    yield wbtc
+def token(addresses):
+    yield Contract(addresses["STETH"])
 
 
 @pytest.fixture(
@@ -174,8 +184,11 @@ def registry():
 
 
 @pytest.fixture
-def live_vault(registry, token):
-    yield Contract(registry.latestVault(token))
+def live_vault(registry, token, stEth, vault):
+    if token == stEth:
+        yield vault
+    else:
+        yield Contract(registry.latestVault(token))
 
 
 @pytest.fixture

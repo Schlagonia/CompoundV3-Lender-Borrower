@@ -19,6 +19,10 @@ def test_live_vault(live_vault, strategy, gov, token, token_whale, amount, comet
     cloned_strategy = Contract.from_abi(
         "Strategy", clone_tx.return_value["newStrategy"], strategy.abi
     )
+    print(f"Base scale {comet.baseScale()}")
+    print(f"Base index scale {comet.baseIndexScale()}")
+    print(f"Reward APR {depositer.getNetRewardApr(0)}")
+    print(f"Net borrow apr {depositer.getNetBorrowApr(0)}")
     current_dr = vault.debtRatio()
     vault.addStrategy(cloned_strategy, 10_000 - current_dr, 0, 2 ** 256 - 1, 0, {"from": gov})
     prev_balance = token.balanceOf(token_whale)

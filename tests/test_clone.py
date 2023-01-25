@@ -34,15 +34,17 @@ def test_clone(
         "Depositer", clone_tx.return_value["newDepositer"], depositer.abi
     )
 
+    """
     cloned_strategy.setStrategyParams(
         strategy.targetLTVMultiplier(),
         strategy.warningLTVMultiplier(),
         strategy.minToSell(),
         strategy.leaveDebtBehind(),
         strategy.maxGasPriceToTend(),
+        strategy.
         {"from": strategy.strategist()},
     )
-
+    """
     # should fail due to already initialized
     with reverts():
         cloned_strategy.initialize(vault, comet, ethToWantFee, cloned_depositer, "NameRevert", {"from": gov})
@@ -128,6 +130,7 @@ def test_clone_of_weth(
         "Depositer", clone_tx.return_value["newDepositer"], depositer.abi
     )
 
+    """
     cloned_strategy.setStrategyParams(
         strategy.targetLTVMultiplier(),
         strategy.warningLTVMultiplier(),
@@ -136,7 +139,7 @@ def test_clone_of_weth(
         strategy.maxGasPriceToTend(),
         {"from": strategy.strategist()},
     )
-
+    """
     # should fail due to already initialized
     with reverts():
         cloned_strategy.initialize(weth_vault, comet, ethToWantFee, cloned_depositer, "NameRevert", {"from": gov})

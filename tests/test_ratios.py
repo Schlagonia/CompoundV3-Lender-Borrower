@@ -1,4 +1,4 @@
-from brownie import chain, reverts, Contract
+from brownie import chain, reverts, Contract, accounts
 
 
 def test_lev_ratios(
@@ -11,7 +11,7 @@ def test_lev_ratios(
     borrow_whale,
     depositer,
     comet,
-    amount
+    amount,
 ):
 
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
@@ -31,6 +31,7 @@ def test_lev_ratios(
             strategy.minToSell(),
             strategy.leaveDebtBehind(),
             strategy.maxGasPriceToTend(),
+            strategy.rewardTokenPriceFeed(),
             {"from": strategy.strategist()},
         )
     # should revert if targetRatio > warningRatio
@@ -41,9 +42,22 @@ def test_lev_ratios(
             strategy.minToSell(),
             strategy.leaveDebtBehind(),
             strategy.maxGasPriceToTend(),
+            strategy.rewardTokenPriceFeed(),
             {"from": strategy.strategist()},
         )
 
+    # should revert if price feed is random
+    with reverts():
+        strategy.setStrategyParams(
+            strategy.targetLTVMultiplier(),
+            strategy.warningLTVMultiplier(),
+            strategy.minToSell(),
+            strategy.leaveDebtBehind(),
+            strategy.maxGasPriceToTend(),
+            accounts[1],
+            {"from": strategy.strategist()},
+        )
+        
     # we reduce the target to half and set ratios just below current ratios
     strategy.setStrategyParams(
         targetLTV / 2,
@@ -51,6 +65,7 @@ def test_lev_ratios(
         strategy.minToSell(),
         strategy.leaveDebtBehind(),
         strategy.maxGasPriceToTend(),
+        strategy.rewardTokenPriceFeed(),
         {"from": strategy.strategist()},
     )
 
@@ -67,6 +82,7 @@ def test_lev_ratios(
         strategy.minToSell(),
         strategy.leaveDebtBehind(),
         strategy.maxGasPriceToTend(),
+        strategy.rewardTokenPriceFeed(),
         {"from": strategy.strategist()},
     )
 

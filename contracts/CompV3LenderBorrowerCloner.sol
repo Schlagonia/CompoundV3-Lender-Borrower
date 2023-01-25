@@ -33,7 +33,8 @@ contract CompV3LenderBorrowerCloner {
             8_000, // warningLTVMultiplier default: 8_000
             1e10, // min rewards to sell
             false, // leave debt behind (default: false)
-            40 * 1e9 // max base fee to perform non-emergency tends (default: 40 gwei)
+            40 * 1e9, // max base fee to perform non-emergency tends (default: 40 gwei)
+            0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5 // COMP/USD price feed
         );
 
         Strategy(_strategy).setRewards(msg.sender);
@@ -81,7 +82,8 @@ contract CompV3LenderBorrowerCloner {
             8_000, // warningLTVMultiplier default: 8_000
             1e10, // min rewards to sell
             false, // leave debt behind (default: false)
-            40 * 1e9 // max base fee to perform non-emergency tends (default: 40 gwei)
+            40 * 1e9, // max base fee to perform non-emergency tends (default: 40 gwei)
+            0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5 // COMP/USD price feed
         );
 
         Strategy(newStrategy).setKeeper(_keeper);

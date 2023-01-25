@@ -76,6 +76,10 @@ contract Strategy is BaseStrategy {
     //Fees for the Uni V3 pools
     mapping (address => mapping (address => uint24)) public uniFees;
 
+    // price feed for the reward token (COMP), 
+    // defaults to comp/USD can be updated manually if needed to comp/ETH
+    address public rewardTokenPriceFeed = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
+
     // NOTE: LTV = Loan-To-Value = debt/collateral
     // Target LTV: ratio up to which which we will borrow
     uint16 public targetLTVMultiplier = 7_000;
@@ -115,7 +119,8 @@ contract Strategy is BaseStrategy {
         uint16 _warningLTVMultiplier,
         uint256 _minToSell,
         bool _leaveDebtBehind,
-        uint256 _maxGasPriceToTend
+        uint256 _maxGasPriceToTend,
+        address _rewardTokenPriceFeed
     ) external onlyAuthorized {
         require(
             _warningLTVMultiplier <= 9_000 &&
@@ -126,6 +131,9 @@ contract Strategy is BaseStrategy {
         minToSell = _minToSell;
         leaveDebtBehind = _leaveDebtBehind;
         maxGasPriceToTend = _maxGasPriceToTend;
+        // make sure this wont revert
+        comet.getPrice(_rewardTokenPriceFeed);
+        rewardTokenPriceFeed = _rewardTokenPriceFeed;
     }
 
     function setFees(
@@ -629,6 +637,7 @@ contract Strategy is BaseStrategy {
     * Get the price feed address for an asset
     */
     function getPriceFeedAddress(address asset) internal view returns (address) {
+        if(asset == comp) return rewardTokenPriceFeed;
         if(asset == baseToken) return comet.baseTokenPriceFeed();
         return comet.getAssetInfoByAddress(asset).priceFeed;
     }
