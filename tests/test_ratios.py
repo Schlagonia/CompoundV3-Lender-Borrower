@@ -31,7 +31,6 @@ def test_lev_ratios(
             strategy.minToSell(),
             strategy.leaveDebtBehind(),
             strategy.maxGasPriceToTend(),
-            strategy.rewardTokenPriceFeed(),
             {"from": strategy.strategist()},
         )
     # should revert if targetRatio > warningRatio
@@ -42,19 +41,6 @@ def test_lev_ratios(
             strategy.minToSell(),
             strategy.leaveDebtBehind(),
             strategy.maxGasPriceToTend(),
-            strategy.rewardTokenPriceFeed(),
-            {"from": strategy.strategist()},
-        )
-
-    # should revert if price feed is random
-    with reverts():
-        strategy.setStrategyParams(
-            strategy.targetLTVMultiplier(),
-            strategy.warningLTVMultiplier(),
-            strategy.minToSell(),
-            strategy.leaveDebtBehind(),
-            strategy.maxGasPriceToTend(),
-            accounts[1],
             {"from": strategy.strategist()},
         )
         
@@ -65,7 +51,6 @@ def test_lev_ratios(
         strategy.minToSell(),
         strategy.leaveDebtBehind(),
         strategy.maxGasPriceToTend(),
-        strategy.rewardTokenPriceFeed(),
         {"from": strategy.strategist()},
     )
 
@@ -82,7 +67,6 @@ def test_lev_ratios(
         strategy.minToSell(),
         strategy.leaveDebtBehind(),
         strategy.maxGasPriceToTend(),
-        strategy.rewardTokenPriceFeed(),
         {"from": strategy.strategist()},
     )
 

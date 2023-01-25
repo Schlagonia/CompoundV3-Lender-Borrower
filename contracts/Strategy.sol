@@ -76,6 +76,9 @@ contract Strategy is BaseStrategy {
     //Fees for the Uni V3 pools
     mapping (address => mapping (address => uint24)) public uniFees;
 
+    // mapping of price feeds for management to customize if needed
+    mapping (address => address) public priceFeeds;
+
     // price feed for the reward token (COMP), 
     // defaults to comp/USD can be updated manually if needed to comp/ETH
     address public rewardTokenPriceFeed = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
@@ -119,8 +122,7 @@ contract Strategy is BaseStrategy {
         uint16 _warningLTVMultiplier,
         uint256 _minToSell,
         bool _leaveDebtBehind,
-        uint256 _maxGasPriceToTend,
-        address _rewardTokenPriceFeed
+        uint256 _maxGasPriceToTend
     ) external onlyAuthorized {
         require(
             _warningLTVMultiplier <= 9_000 &&
@@ -131,9 +133,12 @@ contract Strategy is BaseStrategy {
         minToSell = _minToSell;
         leaveDebtBehind = _leaveDebtBehind;
         maxGasPriceToTend = _maxGasPriceToTend;
-        // make sure this wont revert
-        comet.getPrice(_rewardTokenPriceFeed);
-        rewardTokenPriceFeed = _rewardTokenPriceFeed;
+    }
+
+    function setPriceFeed(address token, address priceFeed) external onlyAuthorized {
+        // just check it doesnt revert
+        comet.getPrice(priceFeed);
+        priceFeeds[token] = priceFeed;
     }
 
     function setFees(
@@ -183,6 +188,11 @@ contract Strategy is BaseStrategy {
 
         //Default to .3% pool for comp/eth and to .05% pool for eth/baseToken
         _setFees(3000, 500, _ethToWantFee);
+
+        // set price feeds for base token and COMP
+        priceFeeds[baseToken] = comet.baseTokenPriceFeed();
+        // default to COMP/USD
+        priceFeeds[comp] = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
 
         strategyName = _strategyName;
 
@@ -636,17 +646,20 @@ contract Strategy is BaseStrategy {
     /*
     * Get the price feed address for an asset
     */
-    function getPriceFeedAddress(address asset) internal view returns (address) {
-        if(asset == comp) return rewardTokenPriceFeed;
-        if(asset == baseToken) return comet.baseTokenPriceFeed();
-        return comet.getAssetInfoByAddress(asset).priceFeed;
+    function getPriceFeedAddress(address asset) internal view returns (address priceFeed) {
+        priceFeed = priceFeeds[asset];
+        if(priceFeed == address(0)) {
+            priceFeed = comet.getAssetInfoByAddress(asset).priceFeed;
+        }
     }
 
     /*
     * Get the current price of an asset from the protocol's persepctive
     */
-    function getCompoundPrice(address asset) internal view returns (uint256) {
-        return comet.getPrice(getPriceFeedAddress(asset));
+    function getCompoundPrice(address asset) internal view returns (uint256 price) {
+        price = comet.getPrice(getPriceFeedAddress(asset));
+        // If weth is base token we need to scale response to e18
+        if(price == 1e8 && asset == weth) price = 1e18; 
     }
 
     //External function used to easisly calculate the current LTV of the strat

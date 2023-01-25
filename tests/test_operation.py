@@ -65,6 +65,7 @@ def test_profitable_harvest(
     strategy.harvest({"from": strategist})
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
 
+    assert depositer.cometBalance() > 0
     # increase rewards, lending interest and borrowing interests
     chain.sleep(50 * 24 * 3600)
     chain.mine(1)
@@ -164,7 +165,7 @@ def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist,
 
     #call with more than we can withdraw
     with reverts():
-        strategy.manualWithdrawAndRepayDebt(depositer.cometBalance() + 100, {"from": strategist})
+        strategy.manualWithdrawAndRepayDebt(depositer.cometBalance() + 10000, {"from": strategist})
 
     #withdraw and repay all
     toWithdraw = depositer.accruedCometBalance({"from":strategist})

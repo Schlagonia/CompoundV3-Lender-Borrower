@@ -69,6 +69,10 @@ def stEth():
     yield Contract("0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0")
 
 @pytest.fixture
+def comp():
+    yield Contract("0xc00e94Cb662C3520282E6f5717214004A7f26888")
+
+@pytest.fixture
 def comet(interface, token, stEth):
     if token == stEth:
         yield interface.Comet("0xA17581A9E3356d9A858b789D68B4d866e593aE94")
@@ -90,8 +94,11 @@ def weth_whale(accounts):
     yield accounts.at("0x2F0b23f53734252Bda2277357e97e1517d6B042A", force=True)
 
 @pytest.fixture
-def ethToWantFee():
-    yield 3000 # wbtc/eth .3% pool
+def ethToWantFee(token, stEth):
+    if token == stEth:
+        yield 500
+    else:
+        yield 3000 # wbtc/eth .3% pool
 
 @pytest.fixture
 def addresses():
@@ -131,6 +138,7 @@ def token(addresses):
         "yvSUSD"
     ],
 )
+
 def yvault():
     vault = Contract("0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE")
     yield vault
@@ -150,6 +158,7 @@ whales = {
     "USDC": "0xba12222222228d8ba445958a75a0704d566bf2c8",
     "DAI": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",  #
     "sUSD": "0xA5407eAE9Ba41422680e2e00537571bcC53efBfD",
+    "wstETH": "0xba12222222228d8ba445958a75a0704d566bf2c8"
 }
 
 
@@ -214,15 +223,37 @@ def weth_vault(pm, gov, rewards, guardian, management, weth):
     yield vault
 
 @pytest.fixture
-def strategy(vault, Strategy, gov, cloner):
+def strategy(vault, Strategy, gov, cloner, comet, weth, comp):
     strategy = Strategy.at(cloner.originalStrategy())
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     chain.mine()
+    if strategy.baseToken() == weth:
+        # set reward price feed to be comp/eth
+        strategy.setPriceFeed(
+            comp,
+            "0x1B39Ee86Ec5979ba5C322b826B3ECb8C79991699",
+            {"from": strategy.strategist()},
+        )
+        # set want to non-scaled version
+        bad_feed = Contract(comet.getAssetInfoByAddress(strategy.want())["priceFeed"])
+        good_feed = bad_feed.stETHtoETHPriceFeed()
+        strategy.setPriceFeed(
+            strategy.want(),
+            good_feed,
+            {"from": strategy.strategist()},
+        )
     yield strategy
 
 @pytest.fixture
-def depositer(cloner, Depositer):
-    yield Depositer.at(cloner.originalDepositer())
+def depositer(cloner, Depositer, gov, weth):
+    depositer = Depositer.at(cloner.originalDepositer())
+    if depositer.baseToken() == weth:
+        depositer.setPriceFeeds(
+            "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+            depositer.rewardTokenPriceFeed(),
+            {"from": gov}
+        )
+    yield depositer
 
 @pytest.fixture
 def RELATIVE_APPROX():
