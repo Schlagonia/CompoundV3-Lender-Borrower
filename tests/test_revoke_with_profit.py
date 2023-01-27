@@ -9,7 +9,6 @@ def test_revoke_with_profit(
     token_whale,
     gov,
     RELATIVE_APPROX,
-    borrow_token,
     borrow_whale,
     depositer,
     comet,

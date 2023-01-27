@@ -41,10 +41,17 @@ def strategist(accounts):
 def keeper(accounts):
     yield accounts[5]
 
+amounts = {
+    "WBTC": 5e8,  # binance14
+    "WETH": 5e18,
+    "USDT": 10_000e18,  #
+    "USDC": 10_000e18,
+    "wstETH": 5e18
+}
 
 @pytest.fixture
 def amount(accounts, token, token_whale):
-    amount = 5 * (10 ** token.decimals())
+    amount = amounts[token.symbol()]
     # In order to get some funds for the token you are about to use,
     # it impersonate an exchange address to use it's funds.
     reserve = accounts.at("0xba12222222228d8ba445958a75a0704d566bf2c8", force=True)
@@ -100,9 +107,7 @@ def ethToWantFee(token, stEth):
     else:
         yield 3000 # wbtc/eth .3% pool
 
-@pytest.fixture
-def addresses():
-    yield {
+addresses = {
     "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",  # WBTC
     "YFI": "0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e",  # YFI
     "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # WETH
@@ -113,41 +118,9 @@ def addresses():
     "STETH": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"
     }
 
-
-@pytest.fixture(
-    params=[
-        # 'WBTC', # WBTC
-        # "YFI",  # YFI
-        # "WETH",  # WETH
-        # 'LINK', # LINK
-        # 'USDT', # USDT
-        "DAI"
-    ]
-)
-def token(addresses):
-    yield Contract(addresses["STETH"])
-
-
-@pytest.fixture(
-    params=[
-        # "yvWBTC", # yvWBTC
-        # "yvWETH", # yvWETH
-        # "yvUSDT",  # yvUSDT
-        # "yvUSDC", # yvUSDC
-        # "yvDAI" # yvDAI
-        "yvSUSD"
-    ],
-)
-
-def yvault():
-    vault = Contract("0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE")
-    yield vault
-
-
 @pytest.fixture
-def borrow_token(yvault):
-    yield Contract(yvault.token())
-
+def token():
+    yield Contract(addresses["STETH"])
 
 whales = {
     "WBTC": "0x28c6c06298d514db089934071355e5743bf21d60",  # binance14
@@ -163,8 +136,8 @@ whales = {
 
 
 @pytest.fixture
-def borrow_whale(borrow_token):
-    yield whales[borrow_token.symbol()]
+def borrow_whale(baseToken):
+    yield whales[baseToken.symbol()]
 
 
 @pytest.fixture

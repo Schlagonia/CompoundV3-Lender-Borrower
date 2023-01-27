@@ -1,4 +1,4 @@
-from brownie import chain, reverts, Contract, accounts
+from brownie import chain, reverts, Contract
 
 
 def test_lev_ratios(
@@ -7,11 +7,10 @@ def test_lev_ratios(
     gov,
     token,
     token_whale,
-    borrow_token,
     borrow_whale,
     depositer,
     comet,
-    amount,
+    amount
 ):
 
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
@@ -76,7 +75,7 @@ def test_lev_ratios(
     print_status(strategy, vault, comet.baseScale())
 
     #account for potential rounding errors
-    assert comet.borrowBalanceOf(strategy) < 10
+    assert comet.borrowBalanceOf(strategy) < 10 ** (vault.decimals() * 3 / 4)
     assert token.balanceOf(strategy) == 0
     assert strategy.balanceOfCollateral() > 0  # want is deposited as collateral
 

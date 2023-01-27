@@ -11,8 +11,6 @@ def test_revoke_strategy_from_vault(
     RELATIVE_APPROX,
     comet,
     depositer,
-    borrow_token,
-    borrow_whale,
     amount
 ):
 

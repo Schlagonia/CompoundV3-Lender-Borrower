@@ -79,10 +79,6 @@ contract Strategy is BaseStrategy {
     // mapping of price feeds for management to customize if needed
     mapping (address => address) public priceFeeds;
 
-    // price feed for the reward token (COMP), 
-    // defaults to comp/USD can be updated manually if needed to comp/ETH
-    address public rewardTokenPriceFeed = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
-
     // NOTE: LTV = Loan-To-Value = debt/collateral
     // Target LTV: ratio up to which which we will borrow
     uint16 public targetLTVMultiplier = 7_000;

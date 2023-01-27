@@ -123,7 +123,7 @@ contract Depositer {
 
         // default to the base token feed given
         baseTokenPriceFeed = comet.baseTokenPriceFeed();
-        // default to the compound feed
+        // default to the COMP/USD feed
         rewardTokenPriceFeed = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
     }
 
@@ -282,13 +282,6 @@ contract Depositer {
                                 _comet.getPrice(baseTokenPriceFeed))) * 
                                     DAYS_PER_YEAR;
         }
-    }
-
-    /*
-    * Get the current price of an asset from the protocol's persepctive
-    */
-    function getCompoundPrice(address priceFeed) internal view returns (uint256) {
-        return comet.getPrice(priceFeed);
     }
 
     function manualWithdraw() external onlyGovernance {
