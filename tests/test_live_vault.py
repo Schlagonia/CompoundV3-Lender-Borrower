@@ -1,9 +1,9 @@
 import pytest
-from brownie import chain, Contract
+from brownie import chain, Contract, reverts
 
 
-def test_live_vault(live_vault, strategy, gov, token, token_whale, amount, comet, cloner,
-    strategist, rewards, keeper, ethToWantFee, depositer, baseToken
+def test_live_vault(live_vault, strategy, depositer, gov, token, token_whale, amount, comet, cloner,
+    strategist, rewards, keeper, ethToWantFee, baseToken, comp, weth
 ):
     vault = live_vault
     clone_tx = cloner.cloneCompV3LenderBorrower(
@@ -19,10 +19,49 @@ def test_live_vault(live_vault, strategy, gov, token, token_whale, amount, comet
     cloned_strategy = Contract.from_abi(
         "Strategy", clone_tx.return_value["newStrategy"], strategy.abi
     )
+
+    cloned_depositer = Contract.from_abi(
+        "Depositer", clone_tx.return_value["newDepositer"], depositer.abi
+    )
+    
+    # should fail due to already initialized
+    with reverts():
+        cloned_strategy.initialize(vault, comet, ethToWantFee, cloned_depositer, "NameRevert", {"from": gov})
+
+    with reverts():
+        cloned_depositer.initialize(comet, {"from": gov})
+    
+    with reverts():
+        cloned_depositer.setStrategy(cloned_strategy.address, {"from": gov})
+
+    with reverts():
+        cloned_depositer.cloneDepositer(comet, {"from":gov})
+    
+    if cloned_strategy.baseToken() == weth:
+        cloned_depositer.setPriceFeeds(
+            "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+            cloned_depositer.rewardTokenPriceFeed(),
+            {"from": gov}
+        )
+        # set reward price feed to be comp/eth
+        cloned_strategy.setPriceFeed(
+            comp,
+            "0x1B39Ee86Ec5979ba5C322b826B3ECb8C79991699",
+            {"from": cloned_strategy.strategist()},
+        )
+        # set want to non-scaled version
+        bad_feed = Contract(comet.getAssetInfoByAddress(cloned_strategy.want())["priceFeed"])
+        good_feed = bad_feed.stETHtoETHPriceFeed()
+        cloned_strategy.setPriceFeed(
+            cloned_strategy.want(),
+            good_feed,
+            {"from": cloned_strategy.strategist()},
+        )
+    
     print(f"Base scale {comet.baseScale()}")
     print(f"Base index scale {comet.baseIndexScale()}")
-    print(f"Reward APR {depositer.getNetRewardApr(0)}")
-    print(f"Net borrow apr {depositer.getNetBorrowApr(0)}")
+    print(f"Reward APR {cloned_depositer.getNetRewardApr(0)}")
+    print(f"Net borrow apr {cloned_depositer.getNetBorrowApr(0)}")
     current_dr = vault.debtRatio()
     if current_dr == 10_000:
         vault.updateStrategyDebtRatio(

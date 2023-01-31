@@ -118,20 +118,21 @@ def test_clone_of_weth(
     gov,
     weth,
     weth_whale,
-    borrow_whale,
-    baseToken,
-    comet,
+    interface,
     ethToWantFee,
     cloner,
     depositer
-):
+):  
+    comet = interface.Comet("0xc3d688B66703497DAA19211EEdff47f25384cdc3")
+    baseToken = Contract(comet.baseToken())
+
     clone_tx = cloner.cloneCompV3LenderBorrower(
         weth_vault,
         strategist,
         rewards,
         keeper,
-        "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
-        ethToWantFee,
+        comet,
+        3000,
         "StrategyCompLender" + weth.symbol() + "Borrower" + baseToken.symbol(),
     )
     cloned_strategy = Contract.from_abi(
@@ -168,14 +169,11 @@ def test_clone_of_weth(
     chain.sleep(60 * 60 * 24)
     chain.mine(1)
 
-    # Send some profit to yvETH
-    baseToken.transfer(cloned_depositer, 1_000 * (10 ** baseToken.decimals()), {"from": borrow_whale})
-
     # TODO: check profits before and after
     strategy.harvest({"from": gov})
     print_debug(cloned_depositer, strategy, comet)
 
-    # We should have profit after getting some profit from yvETH
+    # We should have profit
     assert weth_vault.strategies(strategy).dict()["totalGain"] > 0
     assert weth_vault.strategies(strategy).dict()["totalLoss"] == 0
 

@@ -2405,8 +2405,12 @@ contract Depositer {
     uint64 internal constant DAYS_PER_YEAR = 365;
     uint64 internal constant SECONDS_PER_DAY = 60 * 60 * 24;
     uint64 internal constant SECONDS_PER_YEAR = 365 days;
-    uint256 internal BASE_MANTISSA;
-    uint256 internal BASE_INDEX_SCALE;
+    
+    // price feeds for the reward apr calculation, can be updated manually if needed
+    address public rewardTokenPriceFeed;
+    address public baseTokenPriceFeed;
+
+    uint256 internal SCALER;
     
     //This is the address of the main V3 pool
     Comet public comet;
@@ -2482,8 +2486,17 @@ contract Depositer {
         baseToken.safeApprove(_comet, type(uint256).max);
 
         //For APR calculations
-        BASE_MANTISSA = comet.baseScale();
-        BASE_INDEX_SCALE = comet.baseIndexScale();
+        uint256 BASE_MANTISSA = comet.baseScale();
+        uint256 BASE_INDEX_SCALE = comet.baseIndexScale();
+        
+        // this is needed for reward apr calculations based on decimals of want
+        // we scale rewards per second to the base token decimals and diff between comp decimals and the index scale
+        SCALER = BASE_MANTISSA * 1e18 / BASE_INDEX_SCALE;
+
+        // default to the base token feed given
+        baseTokenPriceFeed = comet.baseTokenPriceFeed();
+        // default to the COMP/USD feed
+        rewardTokenPriceFeed = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
     }
 
     function setStrategy(address _strategy) external {
@@ -2496,6 +2509,14 @@ contract Depositer {
         require(address(baseToken) == strategy.baseToken(), "!base");
         //Make sure this contract is set as the depositer
         require(address(this) == address(strategy.depositer()), "!depositer");
+    }
+
+    function setPriceFeeds(address _baseTokenPriceFeed, address _rewardTokenPriceFeed) external onlyGovernance {
+        // just check the call doesnt revert. We dont care about the amount returned 
+        comet.getPrice(_baseTokenPriceFeed);
+        comet.getPrice(_rewardTokenPriceFeed);
+        baseTokenPriceFeed = _baseTokenPriceFeed;
+        rewardTokenPriceFeed = _rewardTokenPriceFeed;
     }
     
     function cometBalance() public view returns (uint256){
@@ -2604,13 +2625,14 @@ contract Depositer {
     * @return The reward APR in USD as a decimal scaled up by 1e18
     */
     function getRewardAprForSupplyBase(uint256 newAmount) internal view returns (uint) {
+        Comet _comet = comet;
         unchecked {
-            uint256 rewardToSuppliersPerDay =  comet.baseTrackingSupplySpeed() * SECONDS_PER_DAY * BASE_INDEX_SCALE / BASE_MANTISSA;
+            uint256 rewardToSuppliersPerDay =  _comet.baseTrackingSupplySpeed() * SECONDS_PER_DAY * SCALER;
             if(rewardToSuppliersPerDay == 0) return 0;
-            return (getCompoundPrice(comp) * 
+            return (_comet.getPrice(rewardTokenPriceFeed) * 
                         rewardToSuppliersPerDay / 
-                            ((comet.totalSupply() + newAmount) * 
-                                getCompoundPrice(address(baseToken)))) * 
+                            ((_comet.totalSupply() + newAmount) * 
+                                _comet.getPrice(baseTokenPriceFeed))) * 
                                     DAYS_PER_YEAR;
         }
     }
@@ -2622,30 +2644,16 @@ contract Depositer {
     */
     function getRewardAprForBorrowBase(uint256 newAmount) internal view returns (uint256) {
         //borrowBaseRewardApr = (rewardTokenPriceInUsd * rewardToBorrowersPerDay / (baseTokenTotalBorrow * baseTokenPriceInUsd)) * DAYS_PER_YEAR;
+        Comet _comet = comet;
         unchecked {
-            uint256 rewardToBorrowersPerDay =  comet.baseTrackingBorrowSpeed() * SECONDS_PER_DAY * BASE_INDEX_SCALE / BASE_MANTISSA;
+            uint256 rewardToBorrowersPerDay =  _comet.baseTrackingBorrowSpeed() * SECONDS_PER_DAY * SCALER;
             if(rewardToBorrowersPerDay == 0) return 0;
-            return (getCompoundPrice(comp) * 
+            return (_comet.getPrice(rewardTokenPriceFeed) * 
                         rewardToBorrowersPerDay / 
-                            ((comet.totalBorrow() + newAmount) * 
-                                getCompoundPrice(address(baseToken)))) * 
+                            ((_comet.totalBorrow() + newAmount) * 
+                                _comet.getPrice(baseTokenPriceFeed))) * 
                                     DAYS_PER_YEAR;
         }
-    }
-
-    /*
-    * Get the price feed address for an asset
-    */
-    function getPriceFeedAddress(address asset) internal view returns (address) {
-        if(asset == address(baseToken)) return comet.baseTokenPriceFeed();
-        return comet.getAssetInfoByAddress(asset).priceFeed;
-    }
-
-    /*
-    * Get the current price of an asset from the protocol's persepctive
-    */
-    function getCompoundPrice(address asset) internal view returns (uint256) {
-        return comet.getPrice(getPriceFeedAddress(asset));
     }
 
     function manualWithdraw() external onlyGovernance {
@@ -2720,6 +2728,9 @@ contract Strategy is BaseStrategy {
     //Fees for the Uni V3 pools
     mapping (address => mapping (address => uint24)) public uniFees;
 
+    // mapping of price feeds for management to customize if needed
+    mapping (address => address) public priceFeeds;
+
     // NOTE: LTV = Loan-To-Value = debt/collateral
     // Target LTV: ratio up to which which we will borrow
     uint16 public targetLTVMultiplier = 7_000;
@@ -2772,6 +2783,12 @@ contract Strategy is BaseStrategy {
         maxGasPriceToTend = _maxGasPriceToTend;
     }
 
+    function setPriceFeed(address token, address priceFeed) external onlyAuthorized {
+        // just check it doesnt revert
+        comet.getPrice(priceFeed);
+        priceFeeds[token] = priceFeed;
+    }
+
     function setFees(
         uint24 _compToEthFee,
         uint24 _ethToBaseFee,
@@ -2819,6 +2836,13 @@ contract Strategy is BaseStrategy {
 
         //Default to .3% pool for comp/eth and to .05% pool for eth/baseToken
         _setFees(3000, 500, _ethToWantFee);
+
+        // set price feeds for base token and COMP
+        priceFeeds[baseToken] = comet.baseTokenPriceFeed();
+        // default to COMP/USD
+        priceFeeds[comp] = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
+        // default to given feed for want
+        priceFeeds[address(want)] = comet.getAssetInfoByAddress(address(want)).priceFeed;
 
         strategyName = _strategyName;
 
@@ -3272,16 +3296,20 @@ contract Strategy is BaseStrategy {
     /*
     * Get the price feed address for an asset
     */
-    function getPriceFeedAddress(address asset) internal view returns (address) {
-        if(asset == baseToken) return comet.baseTokenPriceFeed();
-        return comet.getAssetInfoByAddress(asset).priceFeed;
+    function getPriceFeedAddress(address asset) internal view returns (address priceFeed) {
+        priceFeed = priceFeeds[asset];
+        if(priceFeed == address(0)) {
+            priceFeed = comet.getAssetInfoByAddress(asset).priceFeed;
+        }
     }
 
     /*
     * Get the current price of an asset from the protocol's persepctive
     */
-    function getCompoundPrice(address asset) internal view returns (uint256) {
-        return comet.getPrice(getPriceFeedAddress(asset));
+    function getCompoundPrice(address asset) internal view returns (uint256 price) {
+        price = comet.getPrice(getPriceFeedAddress(asset));
+        // If weth is base token we need to scale response to e18
+        if(price == 1e8 && asset == weth) price = 1e18; 
     }
 
     //External function used to easisly calculate the current LTV of the strat
