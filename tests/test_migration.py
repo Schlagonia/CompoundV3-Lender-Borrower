@@ -8,7 +8,6 @@ def test_migration(
     gov,
     token,
     token_whale,
-    borrow_token,
     borrow_whale,
     depositer,
     cloner,

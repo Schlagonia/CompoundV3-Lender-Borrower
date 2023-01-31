@@ -49,7 +49,7 @@ def test_profitable_harvest(
     strategist,
     RELATIVE_APPROX,
     chain,
-    borrow_token,
+    baseToken,
     borrow_whale,
     depositer,
     amount
@@ -65,6 +65,7 @@ def test_profitable_harvest(
     strategy.harvest({"from": strategist})
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
 
+    assert depositer.cometBalance() > 0
     # increase rewards, lending interest and borrowing interests
     chain.sleep(50 * 24 * 3600)
     chain.mine(1)
@@ -112,7 +113,7 @@ def test_change_debt(
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == half
 
 
-def test_sweep(gov, vault, strategy, token, token_whale, borrow_whale, borrow_token, amount):
+def test_sweep(gov, vault, strategy, token, token_whale, borrow_whale, baseToken, amount):
     # Strategy want token doesn't work
     token.transfer(strategy, amount, {"from": token_whale})
     assert token.address == strategy.want()
@@ -129,18 +130,18 @@ def test_sweep(gov, vault, strategy, token, token_whale, borrow_whale, borrow_to
     # with reverts("!protected"):
     #     strategy.sweep(strategy.protectedToken(), {"from": gov})
 
-    before_balance = borrow_token.balanceOf(gov)
-    borrow_token.transfer(
-        strategy, 1 * (10 ** borrow_token.decimals()), {"from": borrow_whale}
+    before_balance = baseToken.balanceOf(gov)
+    baseToken.transfer(
+        strategy, 1 * (10 ** baseToken.decimals()), {"from": borrow_whale}
     )
-    assert borrow_token.address != strategy.want()
-    strategy.sweep(borrow_token, {"from": gov})
+    assert baseToken.address != strategy.want()
+    strategy.sweep(baseToken, {"from": gov})
     assert (
-        borrow_token.balanceOf(gov)
-        == 1 * (10 ** borrow_token.decimals()) + before_balance
+        baseToken.balanceOf(gov)
+        == 1 * (10 ** baseToken.decimals()) + before_balance
     )
 
-def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist, comet, depositer, borrow_token, amount, RELATIVE_APPROX):
+def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist, comet, depositer, baseToken, amount, RELATIVE_APPROX):
     user_balance_before = token.balanceOf(token_whale)
     token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(amount, {"from": token_whale})
@@ -154,22 +155,22 @@ def test_manuual_functions(gov, vault, strategy, token, token_whale, strategist,
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
     chain.sleep(10)
 
-    comet.accrueAccount(depositer.address, {"from": strategist})
-    assert borrow_token.balanceOf(strategy.address) == 0
+    assert baseToken.balanceOf(strategy.address) == 0
     begining_debt = strategy.balanceOfDebt()
 
     #call from non-auth
     with reverts():
         strategy.manualWithdrawAndRepayDebt(depositer.cometBalance(), {"from": token_whale})
 
+    comet.accrueAccount(depositer.address, {"from": strategist})
     #call with more than we can withdraw
     with reverts():
-        strategy.manualWithdrawAndRepayDebt(depositer.cometBalance() + 100, {"from": strategist})
+        strategy.manualWithdrawAndRepayDebt(depositer.cometBalance() + (10 ** vault.decimals()), {"from": strategist})
 
     #withdraw and repay all
     toWithdraw = depositer.accruedCometBalance({"from":strategist})
     strategy.manualWithdrawAndRepayDebt(toWithdraw.return_value, {"from": strategist})
-    assert borrow_token.balanceOf(strategy.address) == 0
+    assert baseToken.balanceOf(strategy.address) == 0
     assert  depositer.cometBalance() < toWithdraw.return_value
     assert strategy.balanceOfDebt() < begining_debt
 
@@ -188,7 +189,7 @@ def test_loss_and_airdrop(
     strategist,
     RELATIVE_APPROX,
     chain,
-    borrow_token,
+    baseToken,
     borrow_whale,
     depositer,
     amount,
@@ -209,15 +210,15 @@ def test_loss_and_airdrop(
     #simulate a loss
     yshares = depositer.cometBalance()
     depositer.withdraw(yshares /10, {"from": strategy.address})
-    balance = borrow_token.balanceOf(strategy.address)
-    borrow_token.transfer(gov, balance, {"from": strategy.address})
+    balance = baseToken.balanceOf(strategy.address)
+    baseToken.transfer(gov, balance, {"from": strategy.address})
 
     assert vault.strategies(strategy.address)["totalDebt"] > strategy.estimatedTotalAssets()
 
     chain.sleep(1)
 
     #airdrop back the amount of token = loss
-    borrow_token.transfer(strategy.address, balance, {"from": gov})
+    baseToken.transfer(strategy.address, balance, {"from": gov})
 
     chain.sleep(1)
     #make sure the health check is on so we cant report the loss
@@ -240,7 +241,7 @@ def test_claim_rewards_accrues_account(
     token_whale,
     gov,
     RELATIVE_APPROX,
-    borrow_token,
+    baseToken,
     borrow_whale,
     depositer,
     comet,
@@ -271,7 +272,7 @@ def test_depositer_fucntions(
     token_whale,
     gov,
     RELATIVE_APPROX,
-    borrow_token,
+    baseToken,
     borrow_whale,
     depositer,
     comet,
@@ -306,10 +307,10 @@ def test_depositer_fucntions(
     print(f"Net borrow apr {depositer.getNetBorrowApr(0) * 100}. Net reward apr {depositer.getNetRewardApr(0) * 100}")
     assert depositer.getNetRewardApr(0) > depositer.getNetRewardApr(10000e6)
 
-    before_balance = borrow_token.balanceOf(gov)
+    before_balance = baseToken.balanceOf(gov)
     depositer.manualWithdraw({"from":gov})
 
-    assert borrow_token.balanceOf(gov) > before_balance
+    assert baseToken.balanceOf(gov) > before_balance
     assert depositer.cometBalance() == 0
 
 def test_apr(

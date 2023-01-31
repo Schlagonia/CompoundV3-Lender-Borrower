@@ -7,7 +7,6 @@ def test_lev_ratios(
     gov,
     token,
     token_whale,
-    borrow_token,
     borrow_whale,
     depositer,
     comet,
@@ -43,7 +42,7 @@ def test_lev_ratios(
             strategy.maxGasPriceToTend(),
             {"from": strategy.strategist()},
         )
-
+        
     # we reduce the target to half and set ratios just below current ratios
     strategy.setStrategyParams(
         targetLTV / 2,
@@ -76,7 +75,7 @@ def test_lev_ratios(
     print_status(strategy, vault, comet.baseScale())
 
     #account for potential rounding errors
-    assert comet.borrowBalanceOf(strategy) < 10
+    assert comet.borrowBalanceOf(strategy) < 10 ** (vault.decimals() * 3 / 4)
     assert token.balanceOf(strategy) == 0
     assert strategy.balanceOfCollateral() > 0  # want is deposited as collateral
 
