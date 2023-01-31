@@ -37,6 +37,7 @@ def test_emergency_exit(
 
     # set emergency and exit
     strategy.setEmergencyExit({"from": strategist})
+    chain.sleep(1)
     strategy.harvest({"from": strategist})
     assert strategy.estimatedTotalAssets() < amount
 
