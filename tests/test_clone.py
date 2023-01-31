@@ -140,17 +140,7 @@ def test_clone_of_weth(
     cloned_depositer = Contract.from_abi(
         "Depositer", clone_tx.return_value["newDepositer"], depositer.abi
     )
-
-    """
-    cloned_strategy.setStrategyParams(
-        strategy.targetLTVMultiplier(),
-        strategy.warningLTVMultiplier(),
-        strategy.minToSell(),
-        strategy.leaveDebtBehind(),
-        strategy.maxGasPriceToTend(),
-        {"from": strategy.strategist()},
-    )
-    """
+    
     # should fail due to already initialized
     with reverts():
         cloned_strategy.initialize(weth_vault, comet, ethToWantFee, cloned_depositer, "NameRevert", {"from": gov})
@@ -195,6 +185,7 @@ def test_clone_of_weth(
     print_debug(cloned_depositer, strategy, comet)
 
     weth_vault.withdraw({"from": weth_whale})
+
 
 def print_debug(dep, strategy, com):
     supply_balance = dep.cometBalance()

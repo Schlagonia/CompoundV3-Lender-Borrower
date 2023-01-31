@@ -189,6 +189,8 @@ contract Strategy is BaseStrategy {
         priceFeeds[baseToken] = comet.baseTokenPriceFeed();
         // default to COMP/USD
         priceFeeds[comp] = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
+        // default to given feed for want
+        priceFeeds[address(want)] = comet.getAssetInfoByAddress(address(want)).priceFeed;
 
         strategyName = _strategyName;
 
