@@ -24,10 +24,10 @@ def test_revoke_strategy_from_vault(
 
     vault.revokeStrategy(strategy.address, {"from": gov})
 
-    chain.sleep(100)
+    chain.sleep(1)
     strategy.harvest({"from": gov})
 
-    assert token.balanceOf(vault.address) >= amount
+    assert pytest.approx(token.balanceOf(vault.address), rel=RELATIVE_APPROX) == amount
 
 
 
