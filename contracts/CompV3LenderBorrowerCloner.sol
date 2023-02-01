@@ -42,7 +42,7 @@ contract CompV3LenderBorrowerCloner {
     }
 
     function name() external pure returns (string memory) {
-        return "Yearn-CompV3LenderBorrowerCloner@0.4.3";
+        return "Yearn-CompV3LenderBorrowerCloner@0.4.5";
     }
 
     function cloneCompV3LenderBorrower(

@@ -37,13 +37,14 @@ contract Depositer {
     address public rewardTokenPriceFeed;
     address public baseTokenPriceFeed;
 
+    // scaler used in reward apr calculations
     uint256 internal SCALER;
     
-    //This is the address of the main V3 pool
+    // This is the address of the main V3 pool
     Comet public comet;
-    //This is the token we will be borrowing/supplying
+    // This is the token we will be borrowing/supplying
     IERC20 public baseToken;
-    //The contract to get Comp rewards from
+    // The contract to get Comp rewards from
     CometRewards public constant rewardsContract = 
         CometRewards(0x1B0e765F6224C21223AeA2af16c1C46E38885a40); 
 
@@ -128,14 +129,14 @@ contract Depositer {
     }
 
     function setStrategy(address _strategy) external {
-        //Can only set the strategy once
+        // Can only set the strategy once
         require(address(strategy) == address(0), "set");
 
         strategy = IStrategy(_strategy);
 
-        //make sure it has the same base token
+        // make sure it has the same base token
         require(address(baseToken) == strategy.baseToken(), "!base");
-        //Make sure this contract is set as the depositer
+        // Make sure this contract is set as the depositer
         require(address(this) == address(strategy.depositer()), "!depositer");
     }
 
@@ -147,11 +148,11 @@ contract Depositer {
         rewardTokenPriceFeed = _rewardTokenPriceFeed;
     }
     
-    function cometBalance() public view returns (uint256){
+    function cometBalance() external view returns (uint256){
         return comet.balanceOf(address(this));
     }
 
-    //Non-view function to accrue account for the most accurate accounting
+    // Non-view function to accrue account for the most accurate accounting
     function accruedCometBalance() public returns(uint256) {
         comet.accrueAccount(address(this));
         return comet.balanceOf(address(this));
@@ -195,7 +196,7 @@ contract Depositer {
     /*
     * Gets the amount of reward tokens due to this contract and the base strategy
     */
-    function getRewardsOwed() public view returns (uint256) {
+    function getRewardsOwed() external view returns (uint256) {
         CometStructs.RewardConfig memory config = rewardsContract.rewardConfig(address(comet));
         uint256 accrued = comet.baseTrackingAccrued(address(this)) + comet.baseTrackingAccrued(address(strategy));
         if (config.shouldUpscale) {
@@ -211,20 +212,20 @@ contract Depositer {
     }
 
     function getNetBorrowApr(uint256 newAmount) public view returns(uint256 netApr) {
-        uint256 borrowApr = getBorrowApr(newAmount);
-        uint256 supplyApr = getSupplyApr(newAmount);
-        //supply rate can be higher than borrow when utilization is very high
+        uint256 newUtilization = (comet.totalBorrow() + newAmount) * 1e18 / (comet.totalSupply() + newAmount);
+        uint256 borrowApr = getBorrowApr(newUtilization);
+        uint256 supplyApr = getSupplyApr(newUtilization);
+        // supply rate can be higher than borrow when utilization is very high
         netApr = borrowApr > supplyApr ? borrowApr - supplyApr : 0;
     }
 
     /*
     * Get the current supply APR in Compound III
     */
-    function getSupplyApr(uint256 newAmount) internal view returns (uint) {
-        Comet _comet = comet;
+    function getSupplyApr(uint256 newUtilization) public view returns (uint) {
         unchecked {   
-            return _comet.getSupplyRate(
-                    (_comet.totalBorrow() + newAmount) * 1e18 / (_comet.totalSupply() + newAmount) 
+            return comet.getSupplyRate(
+                     newUtilization // New utilization 
                         ) * SECONDS_PER_YEAR;
         }
     }
@@ -232,11 +233,10 @@ contract Depositer {
     /*
     * Get the current borrow APR in Compound III
     */
-    function getBorrowApr(uint256 newAmount) internal view returns (uint256) {
-        Comet _comet = comet;
+    function getBorrowApr(uint256 newUtilization) public view returns (uint256) {
         unchecked {
-            return _comet.getBorrowRate(
-                     (_comet.totalBorrow() + newAmount) * 1e18 / (_comet.totalSupply() + newAmount) //New utilization
+            return comet.getBorrowRate(
+                     newUtilization // New utilization
                             ) * SECONDS_PER_YEAR;  
         }
     }
@@ -249,10 +249,10 @@ contract Depositer {
     
     /*
     * Get the current reward for supplying APR in Compound III
-    * @param rewardTokenPriceFeed The address of the reward token (e.g. COMP) price feed
+    * @param newAmount The new amount we will be supplying
     * @return The reward APR in USD as a decimal scaled up by 1e18
     */
-    function getRewardAprForSupplyBase(uint256 newAmount) internal view returns (uint) {
+    function getRewardAprForSupplyBase(uint256 newAmount) public view returns (uint) {
         Comet _comet = comet;
         unchecked {
             uint256 rewardToSuppliersPerDay =  _comet.baseTrackingSupplySpeed() * SECONDS_PER_DAY * SCALER;
@@ -267,11 +267,11 @@ contract Depositer {
 
     /*
     * Get the current reward for borrowing APR in Compound III
-    * @param rewardTokenPriceFeed The address of the reward token (e.g. COMP) price feed
+    * @param newAmount The new amount we will be borrowing
     * @return The reward APR in USD as a decimal scaled up by 1e18
     */
-    function getRewardAprForBorrowBase(uint256 newAmount) internal view returns (uint256) {
-        //borrowBaseRewardApr = (rewardTokenPriceInUsd * rewardToBorrowersPerDay / (baseTokenTotalBorrow * baseTokenPriceInUsd)) * DAYS_PER_YEAR;
+    function getRewardAprForBorrowBase(uint256 newAmount) public view returns (uint256) {
+        // borrowBaseRewardApr = (rewardTokenPriceInUsd * rewardToBorrowersPerDay / (baseTokenTotalBorrow * baseTokenPriceInUsd)) * DAYS_PER_YEAR;
         Comet _comet = comet;
         unchecked {
             uint256 rewardToBorrowersPerDay =  _comet.baseTrackingBorrowSpeed() * SECONDS_PER_DAY * SCALER;
@@ -285,9 +285,9 @@ contract Depositer {
     }
 
     function manualWithdraw() external onlyGovernance {
-        //Withdraw everything we have
+        // Withdraw everything we have
         comet.withdraw(address(baseToken), accruedCometBalance());
-        //Transfer the full balance to Gov
+        // Transfer the full balance to Gov
         baseToken.transfer(
             strategy.vault().governance(), 
             baseToken.balanceOf(address(this))

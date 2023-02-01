@@ -120,7 +120,7 @@ addresses = {
 
 @pytest.fixture
 def token():
-    yield Contract(addresses["WSTETH"])
+    yield Contract(addresses["WBTC"])
 
 whales = {
     "WBTC": "0x28c6c06298d514db089934071355e5743bf21d60",  # binance14
