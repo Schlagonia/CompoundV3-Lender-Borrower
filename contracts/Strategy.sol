@@ -16,10 +16,6 @@ import {Comet} from "./interfaces/CompoundV3/CompoundV3.sol";
 import {CometRewards} from "./interfaces/CompoundV3/CompoundV3.sol";
 import {ISwapRouter} from "./interfaces/UniswapV3/ISwapRouter.sol";
 
-interface IBaseFee {
-    function isCurrentBaseFeeAcceptable() external view returns (bool);
-}
-
 interface IBaseFeeGlobal {
     function basefee_global() external view returns (uint256);
 }
@@ -122,7 +118,7 @@ contract Strategy is BaseStrategy {
     ) external onlyAuthorized {
         require(
             _warningLTVMultiplier <= 9_000 &&
-                _targetLTVMultiplier <= _warningLTVMultiplier
+                _targetLTVMultiplier < _warningLTVMultiplier
         );
         targetLTVMultiplier = _targetLTVMultiplier;
         warningLTVMultiplier = _warningLTVMultiplier;
@@ -429,19 +425,10 @@ contract Strategy is BaseStrategy {
         }
     }
 
+    // manualWithdrawAndRepayDebt should be called previous to migration in order
+    // to pay back any outstanding debt before migration
     function prepareMigration(address _newStrategy) internal override {
-        // Withraw from depositer first to know exactly how much we can pay back
-        depositer.withdraw(depositer.accruedCometBalance());
-
-        // Accrue account for accurate balances
-        comet.accrueAccount(address(this));
-
-        if(!leaveDebtBehind) {
-            // If we dont want to leave debt behind sell all rewards to pay all the debt back
-            _claimAndSellRewards();
-        }
-        // Pay back debt and withdrawal all collateral
-        _repayTokenDebt();
+        // still check max withdraw in case of dust borrow balances
         _withdraw(address(want), _maxWithdrawal());
         
         uint256 baseBalance = balanceOfBaseToken();

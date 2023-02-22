@@ -166,7 +166,7 @@ contract Depositer {
 
         uint256 balance = _baseToken.balanceOf(address(this));
         require(balance >= _amount, "!bal");
-        _baseToken.transfer(address(strategy), balance);
+        _baseToken.safeTransfer(address(strategy), balance);
     }
 
     function deposit() external onlyStrategy {
@@ -175,7 +175,7 @@ contract Depositer {
         uint256 _amount = _baseToken.balanceOf(msg.sender);
         if (_amount == 0) return;
         
-        _baseToken.transferFrom(msg.sender, address(this), _amount);
+        _baseToken.safeTransferFrom(msg.sender, address(this), _amount);
         comet.supply(address(_baseToken), _amount);
     }
 
@@ -185,7 +185,7 @@ contract Depositer {
         uint256 compBal = IERC20(comp).balanceOf(address(this));
 
         if(compBal > 0) {
-            IERC20(comp).transfer(address(strategy), compBal);
+            IERC20(comp).safeTransfer(address(strategy), compBal);
         }
     }
 
@@ -288,7 +288,7 @@ contract Depositer {
         // Withdraw everything we have
         comet.withdraw(address(baseToken), accruedCometBalance());
         // Transfer the full balance to Gov
-        baseToken.transfer(
+        baseToken.safeTransfer(
             strategy.vault().governance(), 
             baseToken.balanceOf(address(this))
         );
